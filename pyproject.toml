@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "pydebugger-learning-platform"
 version = "0.1.0"
 description = "Document-grounded programming tutor and debugging engine"
-requires-python = "3.13"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "python-dotenv>=1.2.2,<2",
     "langchain-openai>=1.7.4,<2",
