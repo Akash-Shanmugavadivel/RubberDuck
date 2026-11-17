@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, File, FileUp, Link2, LoaderCircle, Trash2, Youtube } from "lucide-react";
+import { CheckCircle2, File, FileUp, Link2, LoaderCircle, Search, Trash2, Youtube } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, errorMessage } from "../api/client";
 import type { IngestionJob } from "../api/types";
@@ -13,7 +13,9 @@ export function DocumentsPage() {
   const [youtube, setYoutube] = useState("");
   const [languages, setLanguages] = useState("en");
   const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
   const documents = useQuery({ queryKey: ["documents"], queryFn: api.documents });
+  const filteredDocuments = documents.data?.filter(document => document.name.toLowerCase().includes(search.toLowerCase()));
   const hasActiveJobs = jobs.some(job => !terminal.has(job.state));
   useEffect(() => {
     if (!hasActiveJobs) return;
@@ -46,8 +48,8 @@ export function DocumentsPage() {
     {error && <div className="notice error">{error}</div>}
     {jobs.length > 0 && <section className="job-list"><div className="job-list-heading"><strong>Ingestion activity · {jobs.length}</strong>{jobs.some(job => terminal.has(job.state)) && <button className="text-button" onClick={() => setJobs(current => current.filter(job => !terminal.has(job.state)))}>Clear finished</button>}</div>{jobs.map(job => <div className={`job-banner ${job.state}`} key={job.id}><div>{terminal.has(job.state) ? <CheckCircle2/> : <LoaderCircle className="spin"/>}<span><strong>{job.message}</strong><small>{Math.round(job.progress * 100)}% · attempt {job.attempt}/{job.max_attempts}{job.error ? ` · ${job.error}` : ""}</small></span></div><div className="progress"><span style={{ width: `${job.progress * 100}%` }}/></div>{!terminal.has(job.state) && <button className="text-button" onClick={() => api.cancelIngestion(job.id).then(update => setJobs(current => current.map(item => item.id === update.id ? update : item)))}>Cancel</button>}</div>)}</section>}
     <section className="youtube-card"><div><div className="quick-icon red"><Youtube/></div><span><h3>Add a video lesson</h3><p>Index a YouTube transcript alongside your documents.</p></span></div><form onSubmit={submitVideo}><Link2 size={18}/><input value={youtube} onChange={e => setYoutube(e.target.value)} placeholder="YouTube URL or video ID" aria-label="YouTube URL"/><input className="language-input" value={languages} onChange={e => setLanguages(e.target.value)} placeholder="en,ta,hi" aria-label="Preferred transcript languages"/><button disabled={addVideo.isPending || !languages.trim()}>Add lesson</button></form></section>
-    <div className="section-heading"><div><h2>Indexed resources</h2><p>{documents.data?.length ?? 0} available to your tutor</p></div></div>
-    {documents.isLoading ? <div className="loading-row"><LoaderCircle className="spin"/>Loading resources…</div> : documents.data?.length ? <div className="resource-list">{documents.data.map(document => <article key={document.id} className="resource-row"><div className="file-icon"><File/></div><div><h3>{document.name}</h3><p>{document.source_type} · {document.media_type} · index {document.index_version}</p></div><span className="indexed"><CheckCircle2/>Indexed</span><button className="icon-button danger" title="Delete resource" aria-label={`Delete ${document.name}`} disabled={remove.isPending} onClick={() => { if (confirm(`Delete ${document.name}?`)) remove.mutate(document.id); }}><Trash2/></button></article>)}</div> : <EmptyState icon={<FileTextIcon/>} title="No resources yet">Upload a course file or add a video transcript to begin.</EmptyState>}
+    <div className="section-heading resource-heading"><div><h2>Indexed resources</h2><p>{documents.data?.length ?? 0} available to your tutor</p></div><label className="resource-search"><Search/><input aria-label="Search resources" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search materials…"/></label></div>
+    {documents.isLoading ? <div className="loading-row"><LoaderCircle className="spin"/>Loading resources…</div> : filteredDocuments?.length ? <div className="resource-list">{filteredDocuments.map(document => <article key={document.id} className="resource-row"><div className="file-icon"><File/></div><div><h3>{document.name}</h3><p>{document.source_type} · {document.media_type} · index {document.index_version}</p></div><span className="indexed"><CheckCircle2/>Indexed</span><button className="icon-button danger" title="Delete resource" aria-label={`Delete ${document.name}`} disabled={remove.isPending} onClick={() => { if (confirm(`Delete ${document.name}?`)) remove.mutate(document.id); }}><Trash2/></button></article>)}</div> : documents.data?.length ? <EmptyState icon={<Search/>} title="No matching resources">Try a different search term.</EmptyState> : <EmptyState icon={<FileTextIcon/>} title="No resources yet">Upload a course file or add a video transcript to begin.</EmptyState>}
   </div>;
 }
 
