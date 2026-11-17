@@ -9,6 +9,8 @@ from enum import Enum
 from pathlib import Path
 from urllib.parse import urlparse
 
+from dotenv import load_dotenv
+
 
 class ConfigurationError(ValueError):
     """Raised when startup configuration is missing or unsafe."""
@@ -138,6 +140,7 @@ class Settings:
         require_ai: bool = True,
     ) -> Settings:
         project_root = (root or Path.cwd()).resolve()
+        load_dotenv(project_root / ".env", override=False)
         data_dir = Path(
             os.getenv("PYDEBUGGER_DATA_DIR", str(project_root / ".pydebugger-data"))
         )

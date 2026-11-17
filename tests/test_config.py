@@ -131,6 +131,20 @@ def test_environment_configuration_selects_pgvector(monkeypatch, tmp_path: Path)
 
     assert settings.vector_backend is VectorBackend.PGVECTOR
     assert settings.embedding_dimension == 3_072
+
+
+def test_settings_load_project_dotenv_for_gemini(monkeypatch, tmp_path: Path):
+    monkeypatch.delenv("PYDEBUGGER_AI_PROVIDER", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    (tmp_path / ".env").write_text(
+        'PYDEBUGGER_AI_PROVIDER="gemini"\nGOOGLE_API_KEY="test-google-key"\n',
+        encoding="utf-8",
+    )
+
+    settings = Settings.from_env(tmp_path)
+
+    assert settings.ai_provider is AIProvider.GEMINI
+    assert settings.google_api_key == "test-google-key"
     assert "pydebugger:pydebugger" not in repr(settings)
 
 
