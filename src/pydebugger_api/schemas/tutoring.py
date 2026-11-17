@@ -97,6 +97,7 @@ class ConversationSummaryResponse(BaseModel):
     mode: TutorMode
     behavior: TeachingBehavior
     difficulty: TutorDifficulty
+    pinned: bool
     document_ids: list[str]
     created_at: datetime
     updated_at: datetime
@@ -104,6 +105,26 @@ class ConversationSummaryResponse(BaseModel):
 
 class ConversationDetailResponse(ConversationSummaryResponse):
     messages: list[StoredMessageResponse]
+
+
+class ConversationUpdateRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=160)
+    pinned: bool | None = None
+
+
+class StudentNoteCreate(BaseModel):
+    kind: str = Field(default="note", pattern="^(note|bookmark)$")
+    title: str = Field(min_length=1, max_length=160)
+    content: str = Field(min_length=1, max_length=50_000)
+    conversation_id: uuid.UUID | None = None
+    message_id: uuid.UUID | None = None
+    citations: list[CitationResponse] = Field(default_factory=list, max_length=20)
+
+
+class StudentNoteResponse(StudentNoteCreate):
+    id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
 
 
 class TutorPolicyUpdate(BaseModel):

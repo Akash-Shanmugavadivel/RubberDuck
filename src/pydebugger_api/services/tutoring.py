@@ -24,6 +24,7 @@ from ..models import (
     ConversationMessageRecord,
     ConversationRecord,
     DocumentRecord,
+    StudentNoteRecord,
     TutorPolicyRecord,
 )
 from .documents import OwnedResourceNotFoundError
@@ -162,6 +163,61 @@ class TutoringService:
         session.refresh(conversation)
         return result, conversation
 
+    def regenerate(
+        self, session: Session, owner_id: uuid.UUID, conversation_id: uuid.UUID
+    ) -> tuple[TutorResponse, ConversationRecord]:
+        conversation = self.get_conversation(
+            session, owner_id, conversation_id, lock=True
+        )
+        messages = self.conversation_messages(session, conversation.id)
+        if (
+            len(messages) < 2
+            or messages[-2].role != "user"
+            or messages[-1].role != "assistant"
+        ):
+            raise ValueError("The conversation has no answer to regenerate")
+        owned_ids = set(
+            session.scalars(
+                select(DocumentRecord.id).where(
+                    DocumentRecord.owner_id == owner_id,
+                    DocumentRecord.id.in_(conversation.document_ids),
+                )
+            ).all()
+        )
+        if owned_ids != set(conversation.document_ids):
+            raise OwnedResourceNotFoundError(
+                "One or more conversation documents are no longer available"
+            )
+        policy_record = self.get_policy(session)
+        result = self.engine.answer(
+            messages[-2].content,
+            (
+                AssistantMode.RUBBER_DUCK
+                if conversation.mode == "rubber_duck"
+                else AssistantMode.PROGRAMMING_TUTOR
+            ),
+            owned_ids,
+            [
+                ChatMessage(role=item.role, content=item.content)
+                for item in messages[:-2]
+            ],
+            TeachingBehavior(conversation.behavior),
+            TutorDifficulty(conversation.difficulty),
+            TutorPolicy(
+                allow_direct_answers=policy_record.allow_direct_answers,
+                allow_code_solutions=policy_record.allow_code_solutions,
+                hints_only=policy_record.hints_only,
+            ),
+        )
+        assistant = messages[-1]
+        assistant.content = result.answer
+        assistant.grounded = result.grounded
+        assistant.citations = [asdict(citation) for citation in result.citations]
+        conversation.updated_at = datetime.now(UTC)
+        session.commit()
+        session.refresh(conversation)
+        return result, conversation
+
     @staticmethod
     def get_policy(session: Session) -> TutorPolicyRecord:
         policy = session.get(TutorPolicyRecord, 1)
@@ -198,7 +254,10 @@ class TutoringService:
             session.scalars(
                 select(ConversationRecord)
                 .where(ConversationRecord.owner_id == owner_id)
-                .order_by(ConversationRecord.updated_at.desc())
+                .order_by(
+                    ConversationRecord.pinned.desc(),
+                    ConversationRecord.updated_at.desc(),
+                )
                 .limit(100)
             ).all()
         )
@@ -222,6 +281,28 @@ class TutoringService:
             raise OwnedResourceNotFoundError("Conversation not found")
         return conversation
 
+    def update_conversation(
+        self,
+        session: Session,
+        owner_id: uuid.UUID,
+        conversation_id: uuid.UUID,
+        *,
+        title: str | None,
+        pinned: bool | None,
+    ) -> ConversationRecord:
+        conversation = self.get_conversation(session, owner_id, conversation_id)
+        if title is not None:
+            normalized_title = " ".join(title.split())
+            if not normalized_title:
+                raise ValueError("Conversation title cannot be empty")
+            conversation.title = normalized_title
+        if pinned is not None:
+            conversation.pinned = pinned
+        conversation.updated_at = datetime.now(UTC)
+        session.commit()
+        session.refresh(conversation)
+        return conversation
+
     def conversation_messages(
         self, session: Session, conversation_id: uuid.UUID
     ) -> list[ConversationMessageRecord]:
@@ -238,6 +319,78 @@ class TutoringService:
     ) -> None:
         conversation = self.get_conversation(session, owner_id, conversation_id)
         session.delete(conversation)
+        session.commit()
+
+    def list_notes(
+        self, session: Session, owner_id: uuid.UUID
+    ) -> list[StudentNoteRecord]:
+        return list(
+            session.scalars(
+                select(StudentNoteRecord)
+                .where(StudentNoteRecord.owner_id == owner_id)
+                .order_by(StudentNoteRecord.updated_at.desc())
+                .limit(200)
+            ).all()
+        )
+
+    def create_note(
+        self,
+        session: Session,
+        owner_id: uuid.UUID,
+        *,
+        kind: str,
+        title: str,
+        content: str,
+        conversation_id: uuid.UUID | None,
+        message_id: uuid.UUID | None,
+        citations: list[dict[str, object]],
+    ) -> StudentNoteRecord:
+        if conversation_id is not None:
+            self.get_conversation(session, owner_id, conversation_id)
+        if message_id is not None:
+            owned_message = session.scalar(
+                select(ConversationMessageRecord.id)
+                .join(
+                    ConversationRecord,
+                    ConversationRecord.id == ConversationMessageRecord.conversation_id,
+                )
+                .where(
+                    ConversationMessageRecord.id == message_id,
+                    ConversationRecord.owner_id == owner_id,
+                )
+            )
+            if owned_message is None:
+                raise OwnedResourceNotFoundError("Message not found")
+        normalized_title = " ".join(title.split())
+        normalized_content = content.strip()
+        if not normalized_title or not normalized_content:
+            raise ValueError("Note title and content cannot be empty")
+        note = StudentNoteRecord(
+            owner_id=owner_id,
+            kind=kind,
+            title=normalized_title,
+            content=normalized_content,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            citations=citations,
+        )
+        session.add(note)
+        session.commit()
+        session.refresh(note)
+        return note
+
+    def delete_note(
+        self, session: Session, owner_id: uuid.UUID, note_id: uuid.UUID
+    ) -> None:
+        note = session.scalar(
+            select(StudentNoteRecord).where(
+                StudentNoteRecord.id == note_id,
+                StudentNoteRecord.owner_id == owner_id,
+            )
+        )
+        if note is None:
+            raise OwnedResourceNotFoundError("Note not found")
+        session.delete(note)
         session.commit()
 
     @staticmethod

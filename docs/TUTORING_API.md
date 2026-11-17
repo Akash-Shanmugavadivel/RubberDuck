@@ -48,6 +48,14 @@ listed in `PYDEBUGGER_INSTRUCTOR_EMAILS` may call `PUT /api/v1/tutor/policy` to
 control direct answers, complete code solutions, or hints-only behavior. These
 limits are applied on the server and override student selections.
 
+## Conversation productivity
+
+Conversations may be renamed or pinned with `PATCH /conversations/{id}`. Pinned
+items sort first. `POST /conversations/{id}/regenerate` deterministically locates
+the latest user/assistant pair, reloads its saved behavior and policy, and replaces
+the assistant response. Student-owned notes and citation bookmarks are available
+through `GET/POST /notes` and `DELETE /notes/{id}`.
+
 ## Hint flow
 
 The client returns its previous hints with the current problem. The engine

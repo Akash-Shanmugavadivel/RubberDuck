@@ -12,6 +12,7 @@ vi.mock("../api/client", () => ({
     upload: vi.fn(), addYouTube: vi.fn(), deleteDocument: vi.fn(),
     ingestionJob: vi.fn(), cancelIngestion: vi.fn(), tutor: vi.fn(), hint: vi.fn(),
     conversations: vi.fn().mockResolvedValue([]), conversation: vi.fn(), deleteConversation: vi.fn(),
+    updateConversation: vi.fn(), regenerate: vi.fn(), notes: vi.fn().mockResolvedValue([]), createNote: vi.fn(), deleteNote: vi.fn(),
     tutorPolicy: vi.fn().mockResolvedValue({ allow_direct_answers: true, allow_code_solutions: true, hints_only: false }), updateTutorPolicy: vi.fn(),
     executeProject: vi.fn(), executionJob: vi.fn(), cancelExecution: vi.fn(),
   },

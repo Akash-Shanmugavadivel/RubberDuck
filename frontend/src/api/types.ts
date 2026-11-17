@@ -21,13 +21,18 @@ export type TutorAnswer = { conversation_id: string; answer: string; grounded: b
 export type TeachingBehavior = "socratic" | "explain" | "exam_prep" | "debug_coach";
 export type TutorDifficulty = "beginner" | "intermediate" | "advanced";
 export type ConversationSummary = {
-  id: string; title: string; mode: string; behavior: TeachingBehavior; difficulty: TutorDifficulty;
+  id: string; title: string; mode: string; behavior: TeachingBehavior; difficulty: TutorDifficulty; pinned: boolean;
   document_ids: string[]; created_at: string; updated_at: string;
 };
 export type StoredMessage = ChatMessage & {
   id: string; position: number; grounded: boolean | null; citations: Citation[]; created_at: string;
 };
 export type ConversationDetail = ConversationSummary & { messages: StoredMessage[] };
+export type StudentNote = {
+  id: string; kind: "note" | "bookmark"; title: string; content: string;
+  conversation_id: string | null; message_id: string | null; citations: Citation[];
+  created_at: string; updated_at: string;
+};
 export type TutorPolicy = {
   allow_direct_answers: boolean; allow_code_solutions: boolean; hints_only: boolean;
   updated_at: string; updated_by: string | null;

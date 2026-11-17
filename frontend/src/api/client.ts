@@ -1,6 +1,6 @@
 import type {
   AuthResponse, ChatMessage, ConversationDetail, ConversationSummary, Document, ExecutionJob, Health, HintResponse, IngestionJob,
-  MonitoringSummary, Readiness, TeachingBehavior, TestCase, TutorAnswer, TutorDifficulty, TutorPolicy, User,
+  MonitoringSummary, Readiness, StudentNote, TeachingBehavior, TestCase, TutorAnswer, TutorDifficulty, TutorPolicy, User,
 } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
@@ -51,10 +51,15 @@ export const api = {
   deleteDocument: (id: string) => request<void>(`/documents/${id}`, { method: "DELETE" }),
   ingestionJob: (id: string) => request<IngestionJob>(`/ingestion-jobs/${id}`),
   cancelIngestion: (id: string) => request<IngestionJob>(`/ingestion-jobs/${id}/cancel`, { method: "POST" }),
-  tutor: (query: string, mode: string, document_ids: string[], history: ChatMessage[], conversation_id: string | null = null, behavior: TeachingBehavior = "explain", difficulty: TutorDifficulty = "intermediate") => request<TutorAnswer>("/tutor/answer", { method: "POST", body: JSON.stringify({ query, mode, document_ids, history, conversation_id, behavior, difficulty }) }),
+  tutor: (query: string, mode: string, document_ids: string[], history: ChatMessage[], conversation_id: string | null = null, behavior: TeachingBehavior = "explain", difficulty: TutorDifficulty = "intermediate", signal?: AbortSignal) => request<TutorAnswer>("/tutor/answer", { method: "POST", body: JSON.stringify({ query, mode, document_ids, history, conversation_id, behavior, difficulty }), signal }),
   conversations: () => request<ConversationSummary[]>("/tutor/conversations"),
   conversation: (id: string) => request<ConversationDetail>(`/tutor/conversations/${id}`),
   deleteConversation: (id: string) => request<void>(`/tutor/conversations/${id}`, { method: "DELETE" }),
+  updateConversation: (id: string, update: { title?: string; pinned?: boolean }) => request<ConversationSummary>(`/tutor/conversations/${id}`, { method: "PATCH", body: JSON.stringify(update) }),
+  regenerate: (id: string) => request<TutorAnswer>(`/tutor/conversations/${id}/regenerate`, { method: "POST" }),
+  notes: () => request<StudentNote[]>("/tutor/notes"),
+  createNote: (note: Omit<StudentNote, "id" | "created_at" | "updated_at">) => request<StudentNote>("/tutor/notes", { method: "POST", body: JSON.stringify(note) }),
+  deleteNote: (id: string) => request<void>(`/tutor/notes/${id}`, { method: "DELETE" }),
   tutorPolicy: () => request<TutorPolicy>("/tutor/policy"),
   updateTutorPolicy: (policy: Pick<TutorPolicy, "allow_direct_answers" | "allow_code_solutions" | "hints_only">) => request<TutorPolicy>("/tutor/policy", { method: "PUT", body: JSON.stringify(policy) }),
   hint: (problem: string, history: ChatMessage[], previous_hints: string[]) => request<HintResponse>("/tutor/hint", { method: "POST", body: JSON.stringify({ problem, history, previous_hints }) }),

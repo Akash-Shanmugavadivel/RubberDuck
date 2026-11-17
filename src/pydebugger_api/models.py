@@ -202,6 +202,7 @@ class ConversationRecord(Base):
     mode: Mapped[str] = mapped_column(String(32))
     behavior: Mapped[str] = mapped_column(String(32), default="explain")
     difficulty: Mapped[str] = mapped_column(String(32), default="intermediate")
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     document_ids: Mapped[list[str]] = mapped_column(json_type, default=list)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -250,6 +251,33 @@ class TutorPolicyRecord(Base):
     )
     updated_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class StudentNoteRecord(Base):
+    """A student-owned note or citation bookmark."""
+
+    __tablename__ = "student_notes"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True
+    )
+    message_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("conversation_messages.id", ondelete="SET NULL"), nullable=True
+    )
+    kind: Mapped[str] = mapped_column(String(16), default="note")
+    title: Mapped[str] = mapped_column(String(160))
+    content: Mapped[str] = mapped_column(Text)
+    citations: Mapped[list[dict[str, object]]] = mapped_column(json_type, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

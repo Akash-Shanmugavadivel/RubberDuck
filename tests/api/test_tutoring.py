@@ -23,6 +23,7 @@ from pydebugger_api.models import (
     ConversationMessageRecord,
     ConversationRecord,
     DocumentRecord,
+    StudentNoteRecord,
     TutorPolicyRecord,
     User,
 )
@@ -46,6 +47,7 @@ class TestDatabase:
         ConversationRecord.__table__.create(self.engine)
         ConversationMessageRecord.__table__.create(self.engine)
         TutorPolicyRecord.__table__.create(self.engine)
+        StudentNoteRecord.__table__.create(self.engine)
 
     def session(self) -> Generator[Session, None, None]:
         with self.session_factory() as session:
@@ -329,6 +331,62 @@ def test_learning_behavior_difficulty_and_instructor_policy_reach_engine() -> No
     assert engine.answer_calls[-1][4].value == "debug_coach"
     assert engine.answer_calls[-1][5].value == "advanced"
     assert engine.answer_calls[-1][6].hints_only is True
+
+
+def test_conversation_productivity_and_notes_are_owner_scoped() -> None:
+    database = TestDatabase()
+    engine = FakeTutorEngine()
+    app = create_app(settings(), database, DocumentService(engine))
+
+    with TestClient(app) as client:
+        token, owner_id = register(client, "notes@example.com")
+        other_token, _ = register(client, "other-notes@example.com")
+        add_document(database, owner_id, "doc-loops")
+        headers = authorization(token)
+        answer = client.post(
+            "/api/v1/tutor/answer",
+            headers=headers,
+            json={"query": "Explain loops", "document_ids": ["doc-loops"]},
+        )
+        conversation_id = answer.json()["conversation_id"]
+        renamed = client.patch(
+            f"/api/v1/tutor/conversations/{conversation_id}",
+            headers=headers,
+            json={"title": "Loop revision", "pinned": True},
+        )
+        regenerated = client.post(
+            f"/api/v1/tutor/conversations/{conversation_id}/regenerate",
+            headers=headers,
+        )
+        note = client.post(
+            "/api/v1/tutor/notes",
+            headers=headers,
+            json={
+                "kind": "bookmark",
+                "title": "Loop explanation",
+                "content": answer.json()["answer"],
+                "conversation_id": conversation_id,
+                "citations": answer.json()["citations"],
+            },
+        )
+        notes = client.get("/api/v1/tutor/notes", headers=headers)
+        forbidden = client.delete(
+            f"/api/v1/tutor/notes/{note.json()['id']}",
+            headers=authorization(other_token),
+        )
+        deleted = client.delete(
+            f"/api/v1/tutor/notes/{note.json()['id']}", headers=headers
+        )
+
+    assert renamed.status_code == 200
+    assert renamed.json()["title"] == "Loop revision"
+    assert renamed.json()["pinned"] is True
+    assert regenerated.status_code == 200
+    assert len(engine.answer_calls) == 2
+    assert note.status_code == 201
+    assert notes.json()[0]["kind"] == "bookmark"
+    assert forbidden.status_code == 404
+    assert deleted.status_code == 204
 
 
 def test_answer_rejects_another_users_document_before_model_call() -> None:

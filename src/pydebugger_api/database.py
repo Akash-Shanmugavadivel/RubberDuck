@@ -9,7 +9,7 @@ from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-EXPECTED_DATABASE_REVISION = "20261117_0008"
+EXPECTED_DATABASE_REVISION = "20261117_0009"
 
 
 @dataclass(frozen=True)

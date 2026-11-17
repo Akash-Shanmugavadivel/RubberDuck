@@ -195,12 +195,20 @@ accounts are promoted on registration or their next authenticated request.
 
 - `GET /api/v1/tutor/conversations` — list the student's recent conversations
 - `GET /api/v1/tutor/conversations/{conversation_id}` — reopen messages and citations
+- `PATCH /api/v1/tutor/conversations/{conversation_id}` — rename or pin history
+- `POST /api/v1/tutor/conversations/{conversation_id}/regenerate` — replace the latest answer
 - `DELETE /api/v1/tutor/conversations/{conversation_id}` — delete owned history
+- `GET/POST /api/v1/tutor/notes` — list or save notes and citation bookmarks
+- `DELETE /api/v1/tutor/notes/{note_id}` — remove an owned note
 
 Each successful answer stores the user message, assistant response, grounding
 status, and citations in PostgreSQL. Follow-up requests use server-side history;
 the bounded client `history` field remains supported for a first request and
 backward compatibility. Conversation access is always scoped to the JWT owner.
+The React tutor adds searchable date/material groups, Markdown and code rendering,
+copyable code blocks, inline citation previews, automatic scrolling, request stop,
+answer regeneration, and saved notes/bookmarks. Real course grouping will replace
+material grouping when course entities are introduced.
 
 `POST /api/v1/tutor/hint` accepts the current problem, conversation history, and
 previous hints. It returns the next progressive hint without exposing another
