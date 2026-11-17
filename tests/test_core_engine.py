@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from pydebugger import AssistantMode, Settings
 from pydebugger.config import AIProvider, ExecutionBackend
 from pydebugger.engine import PyDebuggerEngine
@@ -130,7 +128,9 @@ def test_retrieval_ranks_across_documents():
     index.add(
         [
             DocumentChunk("a", "doc-a", "Python exceptions", {"source": "errors.txt"}),
-            DocumentChunk("b", "doc-b", "A loop repeats work loop", {"source": "loops.txt"}),
+            DocumentChunk(
+                "b", "doc-b", "A loop repeats work loop", {"source": "loops.txt"}
+            ),
         ]
     )
 
@@ -144,7 +144,9 @@ def test_tutor_uses_history_and_returns_citations():
     index = InMemoryVectorIndex(provider)
     from pydebugger.models import DocumentChunk
 
-    index.add([DocumentChunk("a", "doc-a", "A loop repeats work", {"source": "loops.txt"})])
+    index.add(
+        [DocumentChunk("a", "doc-a", "A loop repeats work", {"source": "loops.txt"})]
+    )
     tutor = TutorService(provider, index)
 
     response = tutor.answer(
@@ -176,6 +178,25 @@ def test_engine_indexes_and_removes_document(tmp_path: Path):
     assert engine.list_documents() == ()
 
 
+def test_engine_removes_vectors_when_memory_catalog_is_missing(tmp_path: Path):
+    provider = FakeAIProvider()
+    index = InMemoryVectorIndex(provider)
+    engine = PyDebuggerEngine(
+        make_settings(tmp_path),
+        provider,
+        provider,
+        DisabledExecutor(),
+        vector_index=index,
+    )
+    source = engine.add_document("notes.txt", b"Python loop notes")
+    with engine._lock:
+        engine._documents.clear()
+
+    assert engine.remove_document(source.id) is False
+    assert index.search("loop", {source.id}) == []
+    assert not source.path.exists()
+
+
 def test_execution_is_disabled_by_default(tmp_path: Path):
     provider = FakeAIProvider()
     engine = PyDebuggerEngine(make_settings(tmp_path), provider, provider)
@@ -183,4 +204,3 @@ def test_execution_is_disabled_by_default(tmp_path: Path):
     result = engine.execute("print('hello')")
 
     assert result.disabled_reason
-

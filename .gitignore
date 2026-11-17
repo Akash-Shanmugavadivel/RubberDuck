@@ -10,3 +10,7 @@ __pycache__
 *.egg-info
 deep-api
 together
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/*.tsbuildinfo

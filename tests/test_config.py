@@ -5,7 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from pydebugger.config import AIProvider, ConfigurationError, ExecutionBackend, Settings
+from pydebugger.config import (
+    AIProvider,
+    ConfigurationError,
+    ExecutionBackend,
+    Settings,
+    VectorBackend,
+)
 
 
 def valid_settings(tmp_path: Path) -> Settings:
@@ -114,4 +120,26 @@ def test_gemini_settings_reject_missing_key(tmp_path: Path):
     )
 
     with pytest.raises(ConfigurationError, match="GOOGLE_API_KEY"):
+        settings.validate()
+
+
+def test_environment_configuration_selects_pgvector(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("PYDEBUGGER_VECTOR_BACKEND", "pgvector")
+    monkeypatch.setenv("PYDEBUGGER_EMBEDDING_DIMENSION", "3072")
+
+    settings = Settings.from_env(tmp_path, require_ai=False)
+
+    assert settings.vector_backend is VectorBackend.PGVECTOR
+    assert settings.embedding_dimension == 3_072
+    assert "pydebugger:pydebugger" not in repr(settings)
+
+
+def test_pgvector_rejects_invalid_dimension(tmp_path: Path):
+    settings = replace(
+        valid_settings(tmp_path),
+        vector_backend=VectorBackend.PGVECTOR,
+        embedding_dimension=4_001,
+    )
+
+    with pytest.raises(ConfigurationError, match="EMBEDDING_DIMENSION"):
         settings.validate()

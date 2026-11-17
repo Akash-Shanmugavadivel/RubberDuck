@@ -45,5 +45,12 @@ job service retries only raised infrastructure failures, up to
 timeouts, and non-zero exits are terminal and are not rerun. Execution remains
 isolated, network-disabled, and disposable on every attempt.
 
-These queues are process-local. A multi-instance deployment should replace this
-service with a durable external queue while retaining the public job contracts.
+Job ownership, state, progress, attempts, errors, and result payloads are durable
+in PostgreSQL. Worker callbacks update records independently of client polling.
+At startup, queued/running/retrying records left by a stopped process are marked
+failed with `worker_restarted`, while completed results remain queryable.
+
+The worker queues and queued input payloads themselves remain process-local, so
+interrupted work is not resumed automatically. A multi-instance deployment
+should eventually replace the thread pools with a durable external broker and
+worker service while retaining the public job contracts and PostgreSQL history.

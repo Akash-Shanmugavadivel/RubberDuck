@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import time
 import uuid
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -34,6 +35,15 @@ from .models import (
     ProjectFile,
 )
 from .monitoring import MonitoringStore, OperationMetric
+
+_WINDOWS_RESERVED_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{number}" for number in range(1, 10)),
+    *(f"LPT{number}" for number in range(1, 10)),
+}
 
 
 class CodeExecutor(Protocol):
@@ -364,6 +374,7 @@ class DockerCodeExecutor:
         if len(project.tests) > 10:
             return "Project exceeds the 10-test execution limit."
         seen: set[str] = set()
+        submitted_paths: set[str] = set()
         total_bytes = 0
         for project_file in project.files:
             path = PurePosixPath(project_file.path)
@@ -379,11 +390,13 @@ class DockerCodeExecutor:
             ):
                 return f"Unsafe Python project path: {project_file.path!r}."
             normalized = path.as_posix()
-            if normalized in seen:
+            comparison_key = normalized.casefold()
+            if comparison_key in seen:
                 return f"Duplicate Python project path: {normalized}."
-            seen.add(normalized)
+            seen.add(comparison_key)
+            submitted_paths.add(normalized)
             total_bytes += len(project_file.source.encode("utf-8"))
-        if project.entrypoint not in seen:
+        if project.entrypoint not in submitted_paths:
             return "Project entry point must name one of the submitted Python files."
         total_bytes += sum(
             len(test.stdin.encode("utf-8")) + len(test.expected_output.encode("utf-8"))
@@ -398,7 +411,12 @@ class DockerCodeExecutor:
     @staticmethod
     def _valid_path_part(part: str, is_file: bool) -> bool:
         candidate = part[:-3] if is_file else part
-        return bool(candidate) and candidate.isidentifier()
+        return (
+            bool(candidate)
+            and candidate.isascii()
+            and candidate.isidentifier()
+            and candidate.upper() not in _WINDOWS_RESERVED_NAMES
+        )
 
     def cancel(self, execution_id: str) -> bool:
         with self._lock:
@@ -550,6 +568,10 @@ class ExecutionService:
         self._capacity = BoundedSemaphore(workers + queue_size)
         self._jobs: dict[str, _MutableJob] = {}
         self._lock = Lock()
+        self._listener: Callable[[ExecutionJob], None] | None = None
+
+    def set_listener(self, listener: Callable[[ExecutionJob], None] | None) -> None:
+        self._listener = listener
 
     def submit(self, source: str | ExecutionProject) -> ExecutionJob:
         if not self._capacity.acquire(blocking=False):
@@ -568,7 +590,9 @@ class ExecutionService:
             with self._lock:
                 self._jobs.pop(execution_id, None)
             raise
-        return self.get(execution_id)
+        job = self.get(execution_id)
+        self._notify(execution_id)
+        return job
 
     def submit_project(self, project: ExecutionProject) -> ExecutionJob:
         return self.submit(project)
@@ -591,6 +615,7 @@ class ExecutionService:
             )
 
     def cancel(self, execution_id: str) -> bool:
+        cancel_running = False
         with self._lock:
             job = self._jobs.get(execution_id)
             if job is None or job.state not in {
@@ -610,14 +635,16 @@ class ExecutionService:
                 job.progress = 1.0
                 job.message = "Cancelled before execution started"
                 job.error_code = "cancelled"
-                return True
-            if job.state is ExecutionState.RETRYING:
+            elif job.state is ExecutionState.RETRYING:
                 job.state = ExecutionState.CANCELLED
                 job.progress = 1.0
                 job.message = "Cancelled before retry"
                 job.error_code = "cancelled"
-                return True
-        return self.executor.cancel(execution_id)
+            else:
+                cancel_running = True
+        cancelled = self.executor.cancel(execution_id) if cancel_running else True
+        self._notify(execution_id)
+        return cancelled
 
     def shutdown(self, *, wait: bool = True) -> None:
         self._pool.shutdown(wait=wait, cancel_futures=True)
@@ -638,6 +665,7 @@ class ExecutionService:
                     job.progress = 0.1
                     job.message = "Running in isolated container"
                     job.attempt = attempt
+                self._notify(execution_id)
                 try:
                     result = self.executor.execute(source, execution_id)
                     state = (
@@ -663,7 +691,7 @@ class ExecutionService:
                             )
                             job.error = self._result_error(result)
                     return
-                except Exception as error:
+                except Exception as error:  # noqa: BLE001 - job boundary records failures
                     if attempt >= self._max_attempts:
                         with self._lock:
                             job = self._jobs[execution_id]
@@ -680,6 +708,7 @@ class ExecutionService:
                             f"Execution infrastructure failed; retrying "
                             f"({attempt + 1}/{self._max_attempts})"
                         )
+                    self._notify(execution_id)
                     if job.cancel_event.wait(min(0.25 * attempt, 1.0)):
                         with self._lock:
                             job = self._jobs[execution_id]
@@ -705,6 +734,16 @@ class ExecutionService:
                         metadata={"state": state.value, "attempt": attempt},
                     )
                 )
+            self._notify(execution_id)
+
+    def _notify(self, execution_id: str) -> None:
+        listener = self._listener
+        if listener is None:
+            return
+        try:
+            listener(self.get(execution_id))
+        except Exception:  # noqa: BLE001 - observers cannot break worker state
+            return
 
     @staticmethod
     def _result_message(state: ExecutionState) -> str:

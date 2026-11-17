@@ -5,6 +5,18 @@ never evaluates student code with `exec`, `eval`, or a host Python subprocess.
 It invokes Docker with an argument array and gives each run a unique container
 name and a private temporary source directory.
 
+## API boundary
+
+FastAPI execution endpoints require JWT authentication and persist the job owner
+before exposing a job ID. Polling and cancellation return not-found for jobs
+owned by another user. The API validates source size, file count, test count,
+relative Python paths, entrypoint membership, and test names before queueing.
+The Docker executor repeats project validation before creating a container.
+
+The API layer never provides an alternate host execution path. If the configured
+Docker backend is disabled or unavailable, the job returns a structured failure
+rather than falling back to `exec`, `eval`, or a host subprocess.
+
 ## Enforced controls
 
 - Network namespace disabled with `--network none`

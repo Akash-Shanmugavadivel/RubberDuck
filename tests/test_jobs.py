@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from threading import Event
 import time
+from threading import Event
 
 import pytest
+from test_core_engine import FakeAIProvider, make_settings
+from test_ingestion import FakeTranscriptProvider
 
-from pydebugger.execution import ExecutionService
 from pydebugger.engine import PyDebuggerEngine
-from pydebugger.execution import DisabledExecutor
+from pydebugger.execution import DisabledExecutor, ExecutionService
 from pydebugger.jobs import (
     IngestionJobService,
     JobCancelledError,
@@ -15,9 +16,6 @@ from pydebugger.jobs import (
     JobTimeoutError,
 )
 from pydebugger.models import DocumentSource, ExecutionResult, JobState
-
-from test_core_engine import FakeAIProvider, make_settings
-from test_ingestion import FakeTranscriptProvider
 
 
 def wait_for(getter, job_id: str, timeout: float = 2):
@@ -77,12 +75,11 @@ def test_invalid_document_fails_once_with_useful_error(tmp_path):
     engine = PyDebuggerEngine(
         make_settings(tmp_path), provider, provider, DisabledExecutor()
     )
-    job = engine.start_document_ingestion(
-        "lesson.pdf", b"not a pdf", "application/pdf"
-    )
+    job = engine.start_document_ingestion("lesson.pdf", b"not a pdf", "application/pdf")
     finished = wait_for(engine.get_ingestion, job.id)
 
     assert finished.state is JobState.FAILED
+    assert finished.progress == 1.0
     assert finished.error_code == "invalid_document"
     assert "valid PDF" in finished.error
     assert finished.attempt == 1
@@ -99,9 +96,7 @@ def test_engine_background_youtube_ingestion_uses_same_job_contract(tmp_path):
         DisabledExecutor(),
         FakeTranscriptProvider(),
     )
-    job = engine.start_youtube_ingestion(
-        "https://youtu.be/dQw4w9WgXcQ", ("en", "ta")
-    )
+    job = engine.start_youtube_ingestion("https://youtu.be/dQw4w9WgXcQ", ("en", "ta"))
     finished = wait_for(engine.get_ingestion, job.id)
 
     assert finished.state is JobState.COMPLETED
@@ -122,9 +117,7 @@ def test_ingestion_retries_transient_failure_only(tmp_path):
             raise OSError("temporary storage failure")
         return expected
 
-    service = IngestionJobService(
-        handler, workers=1, queue_size=0, max_attempts=3
-    )
+    service = IngestionJobService(handler, workers=1, queue_size=0, max_attempts=3)
     job = service.submit("lesson.txt", b"lesson")
     finished = wait_for(service.get, job.id)
     service.shutdown()
@@ -144,6 +137,7 @@ def test_ingestion_timeout_has_stable_error_code():
     service.shutdown()
 
     assert finished.state is JobState.TIMED_OUT
+    assert finished.progress == 1.0
     assert finished.error_code == "ingestion_timeout"
     assert "deadline" in finished.error
 
@@ -166,6 +160,7 @@ def test_ingestion_cancellation_and_bounded_queue():
     service.shutdown()
 
     assert finished.state is JobState.CANCELLED
+    assert finished.progress == 1.0
     assert finished.error_code == "cancelled"
 
 

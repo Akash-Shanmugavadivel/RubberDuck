@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import os
+import re
 from dataclasses import dataclass, field
 from enum import Enum
-import os
 from pathlib import Path
-import re
 from urllib.parse import urlparse
 
 
@@ -22,6 +22,11 @@ class ExecutionBackend(str, Enum):
 class AIProvider(str, Enum):
     AZURE_OPENAI = "azure_openai"
     GEMINI = "gemini"
+
+
+class VectorBackend(str, Enum):
+    CHROMA = "chroma"
+    PGVECTOR = "pgvector"
 
 
 def _env_int(name: str, default: int) -> int:
@@ -67,6 +72,17 @@ def _env_ai_provider() -> AIProvider:
         ) from error
 
 
+def _env_vector_backend() -> VectorBackend:
+    value = os.getenv("PYDEBUGGER_VECTOR_BACKEND", "pgvector").strip().lower()
+    try:
+        return VectorBackend(value)
+    except ValueError as error:
+        choices = ", ".join(item.value for item in VectorBackend)
+        raise ConfigurationError(
+            f"PYDEBUGGER_VECTOR_BACKEND must be one of: {choices}"
+        ) from error
+
+
 @dataclass(frozen=True)
 class Settings:
     data_dir: Path
@@ -107,6 +123,12 @@ class Settings:
     retrieval_context_tokens: int
     conversation_context_tokens: int
     llm_max_output_tokens: int
+    vector_backend: VectorBackend = VectorBackend.CHROMA
+    database_url: str = field(
+        default="postgresql+psycopg://pydebugger:pydebugger@localhost:5432/pydebugger",
+        repr=False,
+    )
+    embedding_dimension: int = 3_072
 
     @classmethod
     def from_env(
@@ -114,22 +136,18 @@ class Settings:
         root: Path | None = None,
         *,
         require_ai: bool = True,
-    ) -> "Settings":
+    ) -> Settings:
         project_root = (root or Path.cwd()).resolve()
         data_dir = Path(
             os.getenv("PYDEBUGGER_DATA_DIR", str(project_root / ".pydebugger-data"))
         )
         if not data_dir.is_absolute():
             data_dir = project_root / data_dir
-        vector_dir = Path(
-            os.getenv("PYDEBUGGER_VECTOR_DIR", str(data_dir / "chroma"))
-        )
+        vector_dir = Path(os.getenv("PYDEBUGGER_VECTOR_DIR", str(data_dir / "chroma")))
         if not vector_dir.is_absolute():
             vector_dir = project_root / vector_dir
         monitoring_db_path = Path(
-            os.getenv(
-                "PYDEBUGGER_MONITORING_DB", str(data_dir / "monitoring.sqlite3")
-            )
+            os.getenv("PYDEBUGGER_MONITORING_DB", str(data_dir / "monitoring.sqlite3"))
         )
         if not monitoring_db_path.is_absolute():
             monitoring_db_path = project_root / monitoring_db_path
@@ -203,9 +221,13 @@ class Settings:
             conversation_context_tokens=_env_int(
                 "PYDEBUGGER_CONVERSATION_CONTEXT_TOKENS", 750
             ),
-            llm_max_output_tokens=_env_int(
-                "PYDEBUGGER_LLM_MAX_OUTPUT_TOKENS", 600
+            llm_max_output_tokens=_env_int("PYDEBUGGER_LLM_MAX_OUTPUT_TOKENS", 600),
+            vector_backend=_env_vector_backend(),
+            database_url=os.getenv(
+                "PYDEBUGGER_DATABASE_URL",
+                "postgresql+psycopg://pydebugger:pydebugger@localhost:5432/pydebugger",
             ),
+            embedding_dimension=_env_int("PYDEBUGGER_EMBEDDING_DIMENSION", 3_072),
         )
         settings.validate(require_ai=require_ai)
         return settings
@@ -228,14 +250,36 @@ class Settings:
                 "PYDEBUGGER_VECTOR_COLLECTION must be 3-63 letters, numbers, dots, "
                 "underscores, or hyphens and start/end with a letter or number"
             )
+        if self.vector_backend is VectorBackend.PGVECTOR:
+            if not self.database_url.startswith(
+                ("postgresql+psycopg://", "postgresql://")
+            ):
+                errors.append(
+                    "PYDEBUGGER_DATABASE_URL must be a PostgreSQL URL for pgvector"
+                )
+            self._check_range(
+                errors,
+                "PYDEBUGGER_EMBEDDING_DIMENSION",
+                self.embedding_dimension,
+                1,
+                4_000,
+            )
         self._check_range(
-            errors, "PYDEBUGGER_UPLOAD_LIMIT_BYTES", self.upload_limit_bytes, 1, 100_000_000
+            errors,
+            "PYDEBUGGER_UPLOAD_LIMIT_BYTES",
+            self.upload_limit_bytes,
+            1,
+            100_000_000,
         )
         self._check_range(
             errors, "PYDEBUGGER_BACKGROUND_WORKERS", self.background_workers, 1, 16
         )
         self._check_range(
-            errors, "PYDEBUGGER_BACKGROUND_QUEUE_SIZE", self.background_queue_size, 0, 100
+            errors,
+            "PYDEBUGGER_BACKGROUND_QUEUE_SIZE",
+            self.background_queue_size,
+            0,
+            100,
         )
         self._check_range(
             errors,
@@ -251,7 +295,9 @@ class Settings:
             1,
             5,
         )
-        self._check_range(errors, "PYDEBUGGER_RETRIEVAL_LIMIT", self.retrieval_limit, 1, 20)
+        self._check_range(
+            errors, "PYDEBUGGER_RETRIEVAL_LIMIT", self.retrieval_limit, 1, 20
+        )
         self._check_range(
             errors, "PYDEBUGGER_RETRIEVAL_MIN_SCORE", self.retrieval_min_score, 0.0, 1.0
         )
@@ -277,8 +323,14 @@ class Settings:
             4_000,
         )
         for name, value in (
-            ("PYDEBUGGER_CHAT_INPUT_COST_PER_MILLION", self.chat_input_cost_per_million),
-            ("PYDEBUGGER_CHAT_OUTPUT_COST_PER_MILLION", self.chat_output_cost_per_million),
+            (
+                "PYDEBUGGER_CHAT_INPUT_COST_PER_MILLION",
+                self.chat_input_cost_per_million,
+            ),
+            (
+                "PYDEBUGGER_CHAT_OUTPUT_COST_PER_MILLION",
+                self.chat_output_cost_per_million,
+            ),
             ("PYDEBUGGER_EMBEDDING_COST_PER_MILLION", self.embedding_cost_per_million),
         ):
             self._check_range(errors, name, value, 0.0, 10_000.0)
