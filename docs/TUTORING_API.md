@@ -5,8 +5,10 @@
 1. FastAPI verifies the JWT and loads the active user.
 2. `TutoringService` confirms every selected document belongs to that user.
 3. The existing engine retrieves evidence only from those document IDs.
-4. `TutorService` selects relevant conversation turns within its token budget.
-5. The configured model produces one answer with traceable citations.
+4. Existing server-side messages are loaded for a supplied conversation ID.
+5. `TutorService` selects relevant conversation turns within its token budget.
+6. The configured model produces one answer with traceable citations.
+7. The question, answer, grounding status, and citations are stored atomically.
 
 Ownership validation occurs before retrieval or model execution. A missing or
 foreign document produces the same `404` response and does not consume model
@@ -23,6 +25,17 @@ response behavior.
 
 The engine applies stricter relevance and token-budget selection after these
 transport-level validation limits.
+
+## Durable conversation history
+
+- `GET /api/v1/tutor/conversations` lists up to 100 conversations, newest first.
+- `GET /api/v1/tutor/conversations/{id}` returns ordered messages and citations.
+- `DELETE /api/v1/tutor/conversations/{id}` permanently removes that conversation.
+
+All three operations are scoped to the authenticated student. Passing another
+student's conversation ID returns `404`. The React tutor screen can start, reopen,
+continue, and delete conversations. Run `uv run alembic upgrade head` after
+pulling this database migration.
 
 ## Hint flow
 

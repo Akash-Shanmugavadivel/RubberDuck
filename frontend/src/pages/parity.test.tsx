@@ -11,6 +11,7 @@ vi.mock("../api/client", () => ({
     documents: vi.fn().mockResolvedValue([]),
     upload: vi.fn(), addYouTube: vi.fn(), deleteDocument: vi.fn(),
     ingestionJob: vi.fn(), cancelIngestion: vi.fn(), tutor: vi.fn(), hint: vi.fn(),
+    conversations: vi.fn().mockResolvedValue([]), conversation: vi.fn(), deleteConversation: vi.fn(),
     executeProject: vi.fn(), executionJob: vi.fn(), cancelExecution: vi.fn(),
   },
   errorMessage: (error: unknown) => error instanceof Error ? error.message : "Error",

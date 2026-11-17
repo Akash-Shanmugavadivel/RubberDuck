@@ -165,26 +165,32 @@ leaving it permanently queued.
 ### Authenticated tutoring API
 
 `POST /api/v1/tutor/answer` accepts a question, learning mode, selected document
-IDs, and recent conversation history. Before retrieval or an LLM call, the API
+IDs, and an optional conversation ID. Before retrieval or an LLM call, the API
 verifies that every selected document belongs to the authenticated user. Answers
-return structured citations and a `grounded` flag.
+return structured citations, a `grounded` flag, and the durable conversation ID.
 
 ```json
 {
   "query": "Explain Python loops",
   "mode": "programming_tutor",
   "document_ids": ["upload-document-id"],
-  "history": [{"role": "user", "content": "What repeats?"}]
+  "conversation_id": null
 }
 ```
+
+- `GET /api/v1/tutor/conversations` — list the student's recent conversations
+- `GET /api/v1/tutor/conversations/{conversation_id}` — reopen messages and citations
+- `DELETE /api/v1/tutor/conversations/{conversation_id}` — delete owned history
+
+Each successful answer stores the user message, assistant response, grounding
+status, and citations in PostgreSQL. Follow-up requests use server-side history;
+the bounded client `history` field remains supported for a first request and
+backward compatibility. Conversation access is always scoped to the JWT owner.
 
 `POST /api/v1/tutor/hint` accepts the current problem, conversation history, and
 previous hints. It returns the next progressive hint without exposing another
 user's documents. History is validated and bounded at the API boundary, while
 the existing tutor service performs relevance selection and token budgeting.
-
-Conversation history is currently supplied by the React client on each request.
-Durable student conversation history will be introduced in its own milestone.
 
 ### Authenticated execution API
 

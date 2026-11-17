@@ -19,7 +19,12 @@ from pydebugger.models import (
 )
 from pydebugger_api.config import APISettings
 from pydebugger_api.main import create_app
-from pydebugger_api.models import DocumentRecord, User
+from pydebugger_api.models import (
+    ConversationMessageRecord,
+    ConversationRecord,
+    DocumentRecord,
+    User,
+)
 from pydebugger_api.services.documents import DocumentService
 
 
@@ -37,6 +42,8 @@ class TestDatabase:
         )
         User.__table__.create(self.engine)
         DocumentRecord.__table__.create(self.engine)
+        ConversationRecord.__table__.create(self.engine)
+        ConversationMessageRecord.__table__.create(self.engine)
 
     def session(self) -> Generator[Session, None, None]:
         with self.session_factory() as session:
@@ -160,6 +167,7 @@ def test_answer_uses_owned_documents_and_conversation_history() -> None:
         )
 
     assert response.status_code == 200
+    assert response.json()["conversation_id"]
     assert response.json()["grounded"] is True
     assert response.json()["citations"][0]["document_id"] == "doc-loops"
     query, mode, document_ids, history = engine.answer_calls[0]
@@ -167,6 +175,96 @@ def test_answer_uses_owned_documents_and_conversation_history() -> None:
     assert mode is AssistantMode.RUBBER_DUCK
     assert document_ids == {"doc-loops"}
     assert history == [ChatMessage(role="user", content="What repeats?")]
+
+
+def test_conversation_history_is_persisted_reused_and_deletable() -> None:
+    database = TestDatabase()
+    engine = FakeTutorEngine()
+    app = create_app(settings(), database, DocumentService(engine))
+
+    with TestClient(app) as client:
+        token, owner_id = register(client, "history@example.com")
+        add_document(database, owner_id, "doc-loops")
+        headers = authorization(token)
+        first = client.post(
+            "/api/v1/tutor/answer",
+            headers=headers,
+            json={"query": "Explain loops", "document_ids": ["doc-loops"]},
+        )
+        conversation_id = first.json()["conversation_id"]
+        second = client.post(
+            "/api/v1/tutor/answer",
+            headers=headers,
+            json={
+                "query": "Give me an example",
+                "document_ids": ["doc-loops"],
+                "conversation_id": conversation_id,
+                "history": [{"role": "user", "content": "Ignore this client copy"}],
+            },
+        )
+        listing = client.get("/api/v1/tutor/conversations", headers=headers)
+        detail = client.get(
+            f"/api/v1/tutor/conversations/{conversation_id}", headers=headers
+        )
+        deleted = client.delete(
+            f"/api/v1/tutor/conversations/{conversation_id}", headers=headers
+        )
+        missing = client.get(
+            f"/api/v1/tutor/conversations/{conversation_id}", headers=headers
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert listing.status_code == 200
+    assert listing.json()[0]["title"] == "Explain loops"
+    assert detail.status_code == 200
+    assert [item["role"] for item in detail.json()["messages"]] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+    ]
+    assert detail.json()["messages"][1]["citations"][0]["chunk_id"] == "chunk-1"
+    assert engine.answer_calls[1][3] == [
+        ChatMessage(role="user", content="Explain loops"),
+        ChatMessage(role="assistant", content="A loop repeats a block of code."),
+    ]
+    assert deleted.status_code == 204
+    assert missing.status_code == 404
+
+
+def test_conversation_history_is_owner_scoped() -> None:
+    database = TestDatabase()
+    engine = FakeTutorEngine()
+    app = create_app(settings(), database, DocumentService(engine))
+
+    with TestClient(app) as client:
+        first_token, first_id = register(client, "owner@example.com")
+        second_token, second_id = register(client, "other@example.com")
+        add_document(database, first_id, "first-doc")
+        add_document(database, second_id, "second-doc")
+        created = client.post(
+            "/api/v1/tutor/answer",
+            headers=authorization(first_token),
+            json={"query": "Private question", "document_ids": ["first-doc"]},
+        )
+        conversation_id = created.json()["conversation_id"]
+        detail = client.get(
+            f"/api/v1/tutor/conversations/{conversation_id}",
+            headers=authorization(second_token),
+        )
+        continued = client.post(
+            "/api/v1/tutor/answer",
+            headers=authorization(second_token),
+            json={
+                "query": "Read it",
+                "document_ids": ["second-doc"],
+                "conversation_id": conversation_id,
+            },
+        )
+
+    assert detail.status_code == 404
+    assert continued.status_code == 404
 
 
 def test_answer_rejects_another_users_document_before_model_call() -> None:

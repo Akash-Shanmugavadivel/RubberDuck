@@ -17,7 +17,14 @@ export type Citation = {
   document_id: string; source_name: string; excerpt: string; location: string | null;
   chunk_id: string | null; score: number | null; source_uri: string | null;
 };
-export type TutorAnswer = { answer: string; grounded: boolean; citations: Citation[] };
+export type TutorAnswer = { conversation_id: string; answer: string; grounded: boolean; citations: Citation[] };
+export type ConversationSummary = {
+  id: string; title: string; mode: string; document_ids: string[]; created_at: string; updated_at: string;
+};
+export type StoredMessage = ChatMessage & {
+  id: string; position: number; grounded: boolean | null; citations: Citation[]; created_at: string;
+};
+export type ConversationDetail = ConversationSummary & { messages: StoredMessage[] };
 export type HintResponse = { problem: string; level: number; hint: string; hints: string[] };
 
 export type Diagnostic = {

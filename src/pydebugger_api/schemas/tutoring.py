@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+from datetime import datetime
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -38,6 +40,7 @@ class TutorAnswerRequest(BaseModel):
     mode: TutorMode = TutorMode.PROGRAMMING_TUTOR
     document_ids: list[str] = Field(min_length=1, max_length=20)
     history: list[ChatMessageRequest] = Field(default_factory=list, max_length=50)
+    conversation_id: uuid.UUID | None = None
 
 
 class CitationResponse(BaseModel):
@@ -55,19 +58,46 @@ class CitationResponse(BaseModel):
 
 
 class TutorAnswerResponse(BaseModel):
+    conversation_id: uuid.UUID
     answer: str
     grounded: bool
     citations: list[CitationResponse]
 
     @classmethod
-    def from_result(cls, result: TutorResponse) -> TutorAnswerResponse:
+    def from_result(
+        cls, result: TutorResponse, conversation_id: uuid.UUID
+    ) -> TutorAnswerResponse:
         return cls(
+            conversation_id=conversation_id,
             answer=result.answer,
             grounded=result.grounded,
             citations=[
                 CitationResponse.from_citation(item) for item in result.citations
             ],
         )
+
+
+class StoredMessageResponse(BaseModel):
+    id: uuid.UUID
+    position: int
+    role: str
+    content: str
+    grounded: bool | None
+    citations: list[CitationResponse]
+    created_at: datetime
+
+
+class ConversationSummaryResponse(BaseModel):
+    id: uuid.UUID
+    title: str
+    mode: TutorMode
+    document_ids: list[str]
+    created_at: datetime
+    updated_at: datetime
+
+
+class ConversationDetailResponse(ConversationSummaryResponse):
+    messages: list[StoredMessageResponse]
 
 
 class HintRequest(BaseModel):

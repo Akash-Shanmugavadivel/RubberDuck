@@ -1,5 +1,5 @@
 import type {
-  AuthResponse, ChatMessage, Document, ExecutionJob, Health, HintResponse, IngestionJob,
+  AuthResponse, ChatMessage, ConversationDetail, ConversationSummary, Document, ExecutionJob, Health, HintResponse, IngestionJob,
   MonitoringSummary, Readiness, TestCase, TutorAnswer, User,
 } from "./types";
 
@@ -51,7 +51,10 @@ export const api = {
   deleteDocument: (id: string) => request<void>(`/documents/${id}`, { method: "DELETE" }),
   ingestionJob: (id: string) => request<IngestionJob>(`/ingestion-jobs/${id}`),
   cancelIngestion: (id: string) => request<IngestionJob>(`/ingestion-jobs/${id}/cancel`, { method: "POST" }),
-  tutor: (query: string, mode: string, document_ids: string[], history: ChatMessage[]) => request<TutorAnswer>("/tutor/answer", { method: "POST", body: JSON.stringify({ query, mode, document_ids, history }) }),
+  tutor: (query: string, mode: string, document_ids: string[], history: ChatMessage[], conversation_id: string | null = null) => request<TutorAnswer>("/tutor/answer", { method: "POST", body: JSON.stringify({ query, mode, document_ids, history, conversation_id }) }),
+  conversations: () => request<ConversationSummary[]>("/tutor/conversations"),
+  conversation: (id: string) => request<ConversationDetail>(`/tutor/conversations/${id}`),
+  deleteConversation: (id: string) => request<void>(`/tutor/conversations/${id}`, { method: "DELETE" }),
   hint: (problem: string, history: ChatMessage[], previous_hints: string[]) => request<HintResponse>("/tutor/hint", { method: "POST", body: JSON.stringify({ problem, history, previous_hints }) }),
   executeProject: (files: Record<string, string>, entrypoint: string, tests: TestCase[]) => request<ExecutionJob>("/executions/project", { method: "POST", body: JSON.stringify({ files, entrypoint, tests }) }),
   executionJob: (id: string) => request<ExecutionJob>(`/executions/${id}`),
