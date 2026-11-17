@@ -23,6 +23,7 @@ from pydebugger_api.models import (
     ConversationMessageRecord,
     ConversationRecord,
     DocumentRecord,
+    TutorPolicyRecord,
     User,
 )
 from pydebugger_api.services.documents import DocumentService
@@ -44,6 +45,7 @@ class TestDatabase:
         DocumentRecord.__table__.create(self.engine)
         ConversationRecord.__table__.create(self.engine)
         ConversationMessageRecord.__table__.create(self.engine)
+        TutorPolicyRecord.__table__.create(self.engine)
 
     def session(self) -> Generator[Session, None, None]:
         with self.session_factory() as session:
@@ -68,8 +70,13 @@ class FakeTutorEngine:
         mode: AssistantMode,
         document_ids: set[str],
         history: list[ChatMessage] | None = None,
+        behavior=None,
+        difficulty=None,
+        policy=None,
     ) -> TutorResponse:
-        self.answer_calls.append((query, mode, document_ids, history))
+        self.answer_calls.append(
+            (query, mode, document_ids, history, behavior, difficulty, policy)
+        )
         return TutorResponse(
             answer="A loop repeats a block of code.",
             grounded=True,
@@ -104,12 +111,13 @@ class FakeTutorEngine:
         return ()
 
 
-def settings() -> APISettings:
+def settings(instructor_emails: str = "") -> APISettings:
     return APISettings(
         PYDEBUGGER_DATABASE_URL=(
             "postgresql+psycopg://pydebugger:pydebugger@localhost/pydebugger"
         ),
         PYDEBUGGER_JWT_SECRET_KEY="test-secret-that-is-longer-than-thirty-two-characters",
+        PYDEBUGGER_INSTRUCTOR_EMAILS=instructor_emails,
     )
 
 
@@ -170,11 +178,16 @@ def test_answer_uses_owned_documents_and_conversation_history() -> None:
     assert response.json()["conversation_id"]
     assert response.json()["grounded"] is True
     assert response.json()["citations"][0]["document_id"] == "doc-loops"
-    query, mode, document_ids, history = engine.answer_calls[0]
+    query, mode, document_ids, history, behavior, difficulty, policy = (
+        engine.answer_calls[0]
+    )
     assert query == "Explain loops"
     assert mode is AssistantMode.RUBBER_DUCK
     assert document_ids == {"doc-loops"}
     assert history == [ChatMessage(role="user", content="What repeats?")]
+    assert behavior.value == "explain"
+    assert difficulty.value == "intermediate"
+    assert policy.allow_direct_answers is True
 
 
 def test_conversation_history_is_persisted_reused_and_deletable() -> None:
@@ -265,6 +278,57 @@ def test_conversation_history_is_owner_scoped() -> None:
 
     assert detail.status_code == 404
     assert continued.status_code == 404
+
+
+def test_learning_behavior_difficulty_and_instructor_policy_reach_engine() -> None:
+    database = TestDatabase()
+    engine = FakeTutorEngine()
+    app = create_app(settings("teacher@example.com"), database, DocumentService(engine))
+
+    with TestClient(app) as client:
+        teacher_token, _ = register(client, "teacher@example.com")
+        student_token, student_id = register(client, "student@example.com")
+        teacher_profile = client.get(
+            "/api/v1/auth/me", headers=authorization(teacher_token)
+        )
+        add_document(database, student_id, "doc-loops")
+        forbidden = client.put(
+            "/api/v1/tutor/policy",
+            headers=authorization(student_token),
+            json={
+                "allow_direct_answers": False,
+                "allow_code_solutions": False,
+                "hints_only": True,
+            },
+        )
+        updated = client.put(
+            "/api/v1/tutor/policy",
+            headers=authorization(teacher_token),
+            json={
+                "allow_direct_answers": False,
+                "allow_code_solutions": False,
+                "hints_only": True,
+            },
+        )
+        answer = client.post(
+            "/api/v1/tutor/answer",
+            headers=authorization(student_token),
+            json={
+                "query": "Fix my loop",
+                "document_ids": ["doc-loops"],
+                "behavior": "debug_coach",
+                "difficulty": "advanced",
+            },
+        )
+
+    assert forbidden.status_code == 403
+    assert teacher_profile.json()["role"] == "instructor"
+    assert updated.status_code == 200
+    assert updated.json()["hints_only"] is True
+    assert answer.status_code == 200
+    assert engine.answer_calls[-1][4].value == "debug_coach"
+    assert engine.answer_calls[-1][5].value == "advanced"
+    assert engine.answer_calls[-1][6].hints_only is True
 
 
 def test_answer_rejects_another_users_document_before_model_call() -> None:

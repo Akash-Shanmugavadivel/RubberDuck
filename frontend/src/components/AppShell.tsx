@@ -1,4 +1,4 @@
-import { Activity, BookOpen, Code2, FileText, LayoutDashboard, LogOut, Menu, X } from "lucide-react";
+import { Activity, BookOpen, Code2, FileText, LayoutDashboard, LogOut, Menu, ShieldCheck, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
@@ -18,7 +18,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <aside className={`sidebar ${open ? "sidebar-open" : ""}`}>
       <div className="brand"><div className="brand-mark">⌁</div><div><strong>RubberDuck</strong><span>AI learning workspace</span></div></div>
       <button className="sidebar-close icon-button" onClick={() => setOpen(false)} aria-label="Close menu"><X /></button>
-      <nav>{links.map(([to, label, Icon]) => <NavLink key={to} to={to} end={to === "/"} onClick={() => setOpen(false)}><Icon size={19}/><span>{label}</span></NavLink>)}</nav>
+      <nav>{links.map(([to, label, Icon]) => <NavLink key={to} to={to} end={to === "/"} onClick={() => setOpen(false)}><Icon size={19}/><span>{label}</span></NavLink>)}{user?.role === "instructor" && <NavLink to="/tutor-policy" onClick={() => setOpen(false)}><ShieldCheck size={19}/><span>Tutor policy</span></NavLink>}</nav>
       <div className="account"><span>{user?.email}</span><button onClick={() => void logout()}><LogOut size={17}/>Sign out</button></div>
     </aside>
     <main className="main-content">{children}</main>

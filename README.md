@@ -127,6 +127,7 @@ in `.env`; never use the documented development default in a deployment:
 PYDEBUGGER_ENVIRONMENT="production"
 PYDEBUGGER_JWT_SECRET_KEY="replace-with-a-long-random-production-secret"
 PYDEBUGGER_JWT_EXPIRY_MINUTES="60"
+PYDEBUGGER_INSTRUCTOR_EMAILS="teacher@college.edu"
 ```
 
 Available endpoints:
@@ -164,7 +165,8 @@ leaving it permanently queued.
 
 ### Authenticated tutoring API
 
-`POST /api/v1/tutor/answer` accepts a question, learning mode, selected document
+`POST /api/v1/tutor/answer` accepts a question, teaching behavior, difficulty,
+the legacy learning mode, selected document
 IDs, and an optional conversation ID. Before retrieval or an LLM call, the API
 verifies that every selected document belongs to the authenticated user. Answers
 return structured citations, a `grounded` flag, and the durable conversation ID.
@@ -173,10 +175,23 @@ return structured citations, a `grounded` flag, and the durable conversation ID.
 {
   "query": "Explain Python loops",
   "mode": "programming_tutor",
+  "behavior": "socratic",
+  "difficulty": "beginner",
   "document_ids": ["upload-document-id"],
   "conversation_id": null
 }
 ```
+
+Teaching behaviors are `socratic`, `explain`, `exam_prep`, and `debug_coach`;
+difficulty is `beginner`, `intermediate`, or `advanced`. The application-wide
+instructor policy is enforced inside the backend prompt, so a student cannot
+bypass it by changing the React request:
+
+- `GET /api/v1/tutor/policy` — show the active limits to any signed-in user
+- `PUT /api/v1/tutor/policy` — update limits as a configured instructor
+
+Set `PYDEBUGGER_INSTRUCTOR_EMAILS` to a comma-separated allowlist. Matching
+accounts are promoted on registration or their next authenticated request.
 
 - `GET /api/v1/tutor/conversations` — list the student's recent conversations
 - `GET /api/v1/tutor/conversations/{conversation_id}` — reopen messages and citations

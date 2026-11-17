@@ -13,6 +13,8 @@ from pydebugger.models import (
     ChatMessage,
     Citation,
     HintProgress,
+    TeachingBehavior,
+    TutorDifficulty,
     TutorResponse,
 )
 
@@ -41,6 +43,8 @@ class TutorAnswerRequest(BaseModel):
     document_ids: list[str] = Field(min_length=1, max_length=20)
     history: list[ChatMessageRequest] = Field(default_factory=list, max_length=50)
     conversation_id: uuid.UUID | None = None
+    behavior: TeachingBehavior = TeachingBehavior.EXPLAIN
+    difficulty: TutorDifficulty = TutorDifficulty.INTERMEDIATE
 
 
 class CitationResponse(BaseModel):
@@ -91,6 +95,8 @@ class ConversationSummaryResponse(BaseModel):
     id: uuid.UUID
     title: str
     mode: TutorMode
+    behavior: TeachingBehavior
+    difficulty: TutorDifficulty
     document_ids: list[str]
     created_at: datetime
     updated_at: datetime
@@ -98,6 +104,17 @@ class ConversationSummaryResponse(BaseModel):
 
 class ConversationDetailResponse(ConversationSummaryResponse):
     messages: list[StoredMessageResponse]
+
+
+class TutorPolicyUpdate(BaseModel):
+    allow_direct_answers: bool
+    allow_code_solutions: bool
+    hints_only: bool
+
+
+class TutorPolicyResponse(TutorPolicyUpdate):
+    updated_at: datetime
+    updated_by: uuid.UUID | None
 
 
 class HintRequest(BaseModel):

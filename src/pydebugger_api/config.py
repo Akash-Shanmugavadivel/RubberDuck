@@ -42,6 +42,10 @@ class APISettings(BaseSettings):
         default=60,
         validation_alias="PYDEBUGGER_JWT_EXPIRY_MINUTES",
     )
+    instructor_emails: str = Field(
+        default="",
+        validation_alias="PYDEBUGGER_INSTRUCTOR_EMAILS",
+    )
 
     @field_validator("database_url")
     @classmethod
@@ -89,6 +93,14 @@ class APISettings(BaseSettings):
             origin.strip().rstrip("/") for origin in self.cors_origins.split(",")
         ]
         return [origin for origin in origins if origin]
+
+    @property
+    def configured_instructor_emails(self) -> set[str]:
+        return {
+            email.strip().casefold()
+            for email in self.instructor_emails.split(",")
+            if email.strip()
+        }
 
 
 @lru_cache(maxsize=1)

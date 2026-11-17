@@ -34,6 +34,9 @@ from .models import (
     IngestionJob,
     ProjectFile,
     RetrievedChunk,
+    TeachingBehavior,
+    TutorDifficulty,
+    TutorPolicy,
     TutorResponse,
 )
 from .monitoring import (
@@ -159,8 +162,13 @@ class LLMDebugger:
         mode: AssistantMode,
         document_ids: set[str],
         history: list[ChatMessage] | None = None,
+        behavior: TeachingBehavior | None = None,
+        difficulty: TutorDifficulty = TutorDifficulty.INTERMEDIATE,
+        policy: TutorPolicy | None = None,
     ) -> TutorResponse:
-        return self.tutor.answer(query, mode, document_ids, history)
+        return self.tutor.answer(
+            query, mode, document_ids, history, behavior, difficulty, policy
+        )
 
     def next_hint(
         self,
@@ -519,13 +527,18 @@ class PyDebuggerApp:
         mode: AssistantMode,
         document_ids: set[str],
         history: list[ChatMessage] | None = None,
+        behavior: TeachingBehavior | None = None,
+        difficulty: TutorDifficulty = TutorDifficulty.INTERMEDIATE,
+        policy: TutorPolicy | None = None,
     ) -> TutorResponse:
         def answer_selected() -> TutorResponse:
             known = {document.id for document in self.list_documents()}
             selected = document_ids & known
             if not selected:
                 raise ValueError("Select at least one indexed document")
-            return self.tutor.answer(query, mode, selected, history)
+            return self.tutor.answer(
+                query, mode, selected, history, behavior, difficulty, policy
+            )
 
         return self._observe(
             "tutor.answer",

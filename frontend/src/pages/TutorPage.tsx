@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BookOpen, Bot, ChevronDown, History, Lightbulb, LoaderCircle, Plus, Send, Trash2, UserRound } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { api, errorMessage } from "../api/client";
-import type { ChatMessage, Citation } from "../api/types";
+import type { ChatMessage, Citation, TeachingBehavior, TutorDifficulty } from "../api/types";
 import { EmptyState, PageHeader } from "../components/AppShell";
 
 type DisplayMessage = ChatMessage & { citations?: Citation[]; grounded?: boolean | null };
@@ -11,6 +11,7 @@ export function TutorPage() {
   const queryClient = useQueryClient();
   const documents = useQuery({ queryKey: ["documents"], queryFn: api.documents });
   const conversations = useQuery({ queryKey: ["conversations"], queryFn: api.conversations });
+  const policy = useQuery({ queryKey: ["tutor-policy"], queryFn: api.tutorPolicy });
   const [conversationId, setConversationId] = useState<string | null>(null);
   const conversation = useQuery({
     queryKey: ["conversation", conversationId],
@@ -18,7 +19,8 @@ export function TutorPage() {
     enabled: Boolean(conversationId),
   });
   const [selected, setSelected] = useState<string[]>([]);
-  const [mode, setMode] = useState("programming_tutor");
+  const [behavior, setBehavior] = useState<TeachingBehavior>("explain");
+  const [difficulty, setDifficulty] = useState<TutorDifficulty>("intermediate");
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [question, setQuestion] = useState("");
   const [hintProblem, setHintProblem] = useState("");
@@ -36,7 +38,8 @@ export function TutorPage() {
   useEffect(() => {
     if (!conversation.data || !documents.data) return;
     const available = new Set(documents.data.map(item => item.id));
-    setMode(conversation.data.mode);
+    setBehavior(conversation.data.behavior);
+    setDifficulty(conversation.data.difficulty);
     setSelected(conversation.data.document_ids.filter(id => available.has(id)));
     setMessages(conversation.data.messages.map(message => ({
       role: message.role,
@@ -49,8 +52,9 @@ export function TutorPage() {
   }, [conversation.data, documents.data]);
 
   const history = useMemo(() => messages.map(({ role, content }) => ({ role, content })), [messages]);
+  const mode = behavior === "socratic" ? "rubber_duck" : "programming_tutor";
   const ask = useMutation({
-    mutationFn: (query: string) => api.tutor(query, mode, selected, history, conversationId),
+    mutationFn: (query: string) => api.tutor(query, mode, selected, history, conversationId, behavior, difficulty),
     onSuccess: result => {
       setConversationId(result.conversation_id);
       setMessages(value => [...value, { role: "assistant", content: result.answer, citations: result.citations, grounded: result.grounded }]);
@@ -105,7 +109,8 @@ export function TutorPage() {
       </select>
       <button className="danger-button" disabled={!conversationId || removeConversation.isPending} onClick={() => conversationId && removeConversation.mutate(conversationId)}><Trash2 size={16}/>Delete</button>
     </section>
-    <section className="tutor-controls"><label>Learning style<select value={mode} onChange={e => setMode(e.target.value)}><option value="programming_tutor">Programming tutor</option><option value="rubber_duck">Rubber duck assistant</option></select></label><div><span>Course context</span><div className="document-chips">{documents.data?.map(doc => <button className={selected.includes(doc.id) ? "selected" : ""} onClick={() => toggle(doc.id)} key={doc.id}>{doc.name}</button>)}</div></div></section>
+    <section className="tutor-controls"><label>Teaching behavior<select value={behavior} onChange={e => setBehavior(e.target.value as TeachingBehavior)}><option value="socratic">Socratic questions</option><option value="explain">Direct explanation</option><option value="exam_prep">Exam preparation</option><option value="debug_coach">Debug coach</option></select></label><label>Difficulty<select value={difficulty} onChange={e => setDifficulty(e.target.value as TutorDifficulty)}><option value="beginner">Beginner</option><option value="intermediate">Intermediate</option><option value="advanced">Advanced</option></select></label><div><span>Course context</span><div className="document-chips">{documents.data?.map(doc => <button className={selected.includes(doc.id) ? "selected" : ""} onClick={() => toggle(doc.id)} key={doc.id}>{doc.name}</button>)}</div></div></section>
+    {policy.data && (!policy.data.allow_direct_answers || !policy.data.allow_code_solutions || policy.data.hints_only) && <div className="notice policy-notice"><strong>Instructor assistance policy:</strong> {policy.data.hints_only ? "Hints only" : policy.data.allow_direct_answers ? "Guided answers" : "No direct answers"}{!policy.data.allow_code_solutions && " · Complete code solutions disabled"}</div>}
     {conversation.isLoading ? <div className="thinking"><LoaderCircle className="spin"/>Loading conversation…</div> : <section className="conversation">{messages.length === 0 ? <EmptyState icon={<Lightbulb/>} title="What would you like to understand?">Ask about a concept, paste an error, or request an explanation from your selected resources.</EmptyState> : messages.map((message, index) => <article className={`message ${message.role}`} key={index}><div className="avatar">{message.role === "user" ? <UserRound/> : <Bot/>}</div><div className="message-body"><div className="message-meta">{message.role === "user" ? "You" : "RubberDuck"}{message.role === "assistant" && <span className={message.grounded ? "grounded" : "ungrounded"}>{message.grounded ? "Grounded" : "No supporting evidence"}</span>}</div><p>{message.content}</p>{message.citations && message.citations.length > 0 && <details><summary><BookOpen size={16}/>Sources used <ChevronDown size={15}/></summary>{message.citations.map((citation, i) => <div className="citation" key={`${citation.chunk_id}-${i}`}><div><strong>[{i + 1}] {citation.source_uri ? <a href={citation.source_uri} target="_blank" rel="noreferrer">{citation.source_name}</a> : citation.source_name}</strong><span>{citation.location}</span></div><p>{citation.excerpt}</p><small>Chunk: {citation.chunk_id ?? "unknown"}{citation.score === null ? "" : ` · Relevance: ${citation.score.toFixed(3)}`}</small></div>)}</details>}</div></article>)}{ask.isPending && <div className="thinking"><LoaderCircle className="spin"/>Finding evidence and preparing an explanation…</div>}</section>}
     {error && <div className="notice error">{error}</div>}
     <section className="hint-panel"><div className="hint-problem"><label htmlFor="hint-problem">Need a hint instead?</label><textarea id="hint-problem" rows={3} value={hintProblem} onChange={event => { setHintProblem(event.target.value); setHints([]); }} placeholder="Describe the problem, paste your code, and say where you are stuck…"/><button onClick={() => hint.mutate()} disabled={hint.isPending || !hintProblem.trim()}><Lightbulb/>{hint.isPending ? "Thinking…" : `Reveal hint ${hints.length + 1}`}</button></div>{hints.map((item, index) => <div className="hint" key={index}><strong>Hint {index + 1}</strong><p>{item}</p></div>)}</section>

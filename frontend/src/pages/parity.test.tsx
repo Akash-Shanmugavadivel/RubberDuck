@@ -12,6 +12,7 @@ vi.mock("../api/client", () => ({
     upload: vi.fn(), addYouTube: vi.fn(), deleteDocument: vi.fn(),
     ingestionJob: vi.fn(), cancelIngestion: vi.fn(), tutor: vi.fn(), hint: vi.fn(),
     conversations: vi.fn().mockResolvedValue([]), conversation: vi.fn(), deleteConversation: vi.fn(),
+    tutorPolicy: vi.fn().mockResolvedValue({ allow_direct_answers: true, allow_code_solutions: true, hints_only: false }), updateTutorPolicy: vi.fn(),
     executeProject: vi.fn(), executionJob: vi.fn(), cancelExecution: vi.fn(),
   },
   errorMessage: (error: unknown) => error instanceof Error ? error.message : "Error",
@@ -35,6 +36,8 @@ describe("React parity controls", () => {
   it("provides a standalone progressive-hint problem editor", async () => {
     renderPage(<TutorPage/>);
     expect(await screen.findByLabelText("Need a hint instead?")).toBeInTheDocument();
+    expect(screen.getByLabelText("Teaching behavior")).toHaveValue("explain");
+    expect(screen.getByLabelText("Difficulty")).toHaveValue("intermediate");
     expect(screen.getByRole("button", { name: "Reveal hint 1" })).toBeDisabled();
   });
 

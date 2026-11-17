@@ -37,6 +37,17 @@ student's conversation ID returns `404`. The React tutor screen can start, reope
 continue, and delete conversations. Run `uv run alembic upgrade head` after
 pulling this database migration.
 
+## Learning-aware behavior and policy
+
+Answer requests may set `behavior` to `socratic`, `explain`, `exam_prep`, or
+`debug_coach`, and `difficulty` to `beginner`, `intermediate`, or `advanced`.
+Both values are stored with the conversation and restored by the React client.
+
+`GET /api/v1/tutor/policy` returns the active assistance limits. Only an account
+listed in `PYDEBUGGER_INSTRUCTOR_EMAILS` may call `PUT /api/v1/tutor/policy` to
+control direct answers, complete code solutions, or hints-only behavior. These
+limits are applied on the server and override student selections.
+
 ## Hint flow
 
 The client returns its previous hints with the current problem. The engine

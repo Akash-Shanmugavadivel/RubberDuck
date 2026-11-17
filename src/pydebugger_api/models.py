@@ -33,6 +33,9 @@ class User(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(
+        String(16), default="student", server_default="student"
+    )
     is_active: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default="true"
     )
@@ -197,6 +200,8 @@ class ConversationRecord(Base):
     )
     title: Mapped[str] = mapped_column(String(160))
     mode: Mapped[str] = mapped_column(String(32))
+    behavior: Mapped[str] = mapped_column(String(32), default="explain")
+    difficulty: Mapped[str] = mapped_column(String(32), default="intermediate")
     document_ids: Mapped[list[str]] = mapped_column(json_type, default=list)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -225,4 +230,27 @@ class ConversationMessageRecord(Base):
     citations: Mapped[list[dict[str, object]]] = mapped_column(json_type, default=list)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class TutorPolicyRecord(Base):
+    """Application-wide assistance limits controlled by instructors."""
+
+    __tablename__ = "tutor_policy"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    allow_direct_answers: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="true"
+    )
+    allow_code_solutions: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="true"
+    )
+    hints_only: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

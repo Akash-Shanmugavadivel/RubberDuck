@@ -14,6 +14,9 @@ from pydebugger.models import (
     AssistantMode,
     ChatMessage,
     HintProgress,
+    TeachingBehavior,
+    TutorDifficulty,
+    TutorPolicy,
     TutorResponse,
 )
 
@@ -21,6 +24,7 @@ from ..models import (
     ConversationMessageRecord,
     ConversationRecord,
     DocumentRecord,
+    TutorPolicyRecord,
 )
 from .documents import OwnedResourceNotFoundError
 
@@ -32,6 +36,9 @@ class TutorEngine(Protocol):
         mode: AssistantMode,
         document_ids: set[str],
         history: list[ChatMessage] | None = None,
+        behavior: TeachingBehavior | None = None,
+        difficulty: TutorDifficulty = TutorDifficulty.INTERMEDIATE,
+        policy: TutorPolicy | None = None,
     ) -> TutorResponse: ...
 
     def next_hint(
@@ -55,6 +62,8 @@ class TutoringService:
         document_ids: set[str],
         history: list[ChatMessage],
         conversation_id: uuid.UUID | None = None,
+        behavior: TeachingBehavior = TeachingBehavior.EXPLAIN,
+        difficulty: TutorDifficulty = TutorDifficulty.INTERMEDIATE,
     ) -> tuple[TutorResponse, ConversationRecord]:
         cleaned_ids = {
             document_id.strip() for document_id in document_ids if document_id.strip()
@@ -81,8 +90,19 @@ class TutoringService:
         stored_history = (
             self._history(session, conversation.id) if conversation is not None else []
         )
+        policy_record = self.get_policy(session)
         result = self.engine.answer(
-            query.strip(), mode, owned_ids, stored_history or history
+            query.strip(),
+            mode,
+            owned_ids,
+            stored_history or history,
+            behavior,
+            difficulty,
+            TutorPolicy(
+                allow_direct_answers=policy_record.allow_direct_answers,
+                allow_code_solutions=policy_record.allow_code_solutions,
+                hints_only=policy_record.hints_only,
+            ),
         )
         mode_name = (
             "rubber_duck" if mode is AssistantMode.RUBBER_DUCK else "programming_tutor"
@@ -92,6 +112,8 @@ class TutoringService:
                 owner_id=owner_id,
                 title=self._title(query),
                 mode=mode_name,
+                behavior=behavior.value,
+                difficulty=difficulty.value,
                 document_ids=sorted(owned_ids),
             )
             session.add(conversation)
@@ -101,6 +123,8 @@ class TutoringService:
                 session, owner_id, conversation.id, lock=True
             )
             conversation.mode = mode_name
+            conversation.behavior = behavior.value
+            conversation.difficulty = difficulty.value
             conversation.document_ids = sorted(owned_ids)
             conversation.updated_at = datetime.now(UTC)
         next_position = (
@@ -137,6 +161,34 @@ class TutoringService:
         session.commit()
         session.refresh(conversation)
         return result, conversation
+
+    @staticmethod
+    def get_policy(session: Session) -> TutorPolicyRecord:
+        policy = session.get(TutorPolicyRecord, 1)
+        if policy is None:
+            policy = TutorPolicyRecord(id=1)
+            session.add(policy)
+            session.flush()
+        return policy
+
+    @staticmethod
+    def update_policy(
+        session: Session,
+        instructor_id: uuid.UUID,
+        *,
+        allow_direct_answers: bool,
+        allow_code_solutions: bool,
+        hints_only: bool,
+    ) -> TutorPolicyRecord:
+        policy = TutoringService.get_policy(session)
+        policy.allow_direct_answers = allow_direct_answers
+        policy.allow_code_solutions = allow_code_solutions
+        policy.hints_only = hints_only
+        policy.updated_by = instructor_id
+        policy.updated_at = datetime.now(UTC)
+        session.commit()
+        session.refresh(policy)
+        return policy
 
     @staticmethod
     def list_conversations(

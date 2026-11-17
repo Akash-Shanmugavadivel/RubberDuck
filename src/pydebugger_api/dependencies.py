@@ -84,3 +84,14 @@ def get_current_user(
         return authentication.user_from_token(session, credentials.credentials)
     except InvalidCredentialsError as error:
         raise unauthorized from error
+
+
+def get_current_instructor(
+    user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    if user.role != "instructor":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Instructor access required",
+        )
+    return user

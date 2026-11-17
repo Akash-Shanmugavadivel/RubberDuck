@@ -1,4 +1,4 @@
-export type User = { id: string; email: string; is_active: boolean; created_at: string };
+export type User = { id: string; email: string; role: "student" | "instructor"; is_active: boolean; created_at: string };
 export type AuthResponse = { access_token: string; token_type: string; expires_in: number; user: User };
 
 export type Document = {
@@ -18,13 +18,20 @@ export type Citation = {
   chunk_id: string | null; score: number | null; source_uri: string | null;
 };
 export type TutorAnswer = { conversation_id: string; answer: string; grounded: boolean; citations: Citation[] };
+export type TeachingBehavior = "socratic" | "explain" | "exam_prep" | "debug_coach";
+export type TutorDifficulty = "beginner" | "intermediate" | "advanced";
 export type ConversationSummary = {
-  id: string; title: string; mode: string; document_ids: string[]; created_at: string; updated_at: string;
+  id: string; title: string; mode: string; behavior: TeachingBehavior; difficulty: TutorDifficulty;
+  document_ids: string[]; created_at: string; updated_at: string;
 };
 export type StoredMessage = ChatMessage & {
   id: string; position: number; grounded: boolean | null; citations: Citation[]; created_at: string;
 };
 export type ConversationDetail = ConversationSummary & { messages: StoredMessage[] };
+export type TutorPolicy = {
+  allow_direct_answers: boolean; allow_code_solutions: boolean; hints_only: boolean;
+  updated_at: string; updated_by: string | null;
+};
 export type HintResponse = { problem: string; level: number; hint: string; hints: string[] };
 
 export type Diagnostic = {

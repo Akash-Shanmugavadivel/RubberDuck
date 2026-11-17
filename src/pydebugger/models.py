@@ -13,6 +13,26 @@ class AssistantMode(str, Enum):
     RUBBER_DUCK = "Rubber Duck Assistant"
 
 
+class TeachingBehavior(str, Enum):
+    SOCRATIC = "socratic"
+    EXPLAIN = "explain"
+    EXAM_PREP = "exam_prep"
+    DEBUG_COACH = "debug_coach"
+
+
+class TutorDifficulty(str, Enum):
+    BEGINNER = "beginner"
+    INTERMEDIATE = "intermediate"
+    ADVANCED = "advanced"
+
+
+@dataclass(frozen=True)
+class TutorPolicy:
+    allow_direct_answers: bool = True
+    allow_code_solutions: bool = True
+    hints_only: bool = False
+
+
 class JobState(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"

@@ -3,15 +3,21 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from test_core_engine import FakeAIProvider, make_settings
 
 from pydebugger import AssistantMode
 from pydebugger.engine import PyDebuggerEngine
 from pydebugger.execution import DisabledExecutor
-from pydebugger.models import ChatMessage, DocumentChunk, RetrievedChunk
+from pydebugger.models import (
+    ChatMessage,
+    DocumentChunk,
+    RetrievedChunk,
+    TeachingBehavior,
+    TutorDifficulty,
+    TutorPolicy,
+)
 from pydebugger.retrieval import InMemoryVectorIndex, RetrievalError
 from pydebugger.tutoring import TutorService, relevant_conversation
-
-from test_core_engine import FakeAIProvider, make_settings
 
 
 class FailingReplacementIndex(InMemoryVectorIndex):
@@ -48,7 +54,11 @@ def test_upload_replacement_keeps_id_and_invalidates_old_chunks(tmp_path: Path):
     provider = FakeAIProvider()
     index = InMemoryVectorIndex(provider)
     engine = PyDebuggerEngine(
-        make_settings(tmp_path), provider, provider, DisabledExecutor(), vector_index=index
+        make_settings(tmp_path),
+        provider,
+        provider,
+        DisabledExecutor(),
+        vector_index=index,
     )
 
     first = engine.add_document("lesson.txt", b"old exception material")
@@ -67,7 +77,10 @@ def test_upload_replacement_keeps_id_and_invalidates_old_chunks(tmp_path: Path):
 def test_identical_upload_is_idempotent(tmp_path: Path):
     provider = FakeAIProvider()
     engine = PyDebuggerEngine(
-        make_settings(tmp_path), provider, provider, DisabledExecutor(),
+        make_settings(tmp_path),
+        provider,
+        provider,
+        DisabledExecutor(),
         vector_index=InMemoryVectorIndex(provider),
     )
     first = engine.add_document("lesson.txt", b"same lesson")
@@ -81,7 +94,11 @@ def test_failed_replacement_preserves_previous_revision(tmp_path: Path):
     provider = FakeAIProvider()
     index = FailingReplacementIndex(provider)
     engine = PyDebuggerEngine(
-        make_settings(tmp_path), provider, provider, DisabledExecutor(), vector_index=index
+        make_settings(tmp_path),
+        provider,
+        provider,
+        DisabledExecutor(),
+        vector_index=index,
     )
     first = engine.add_document("lesson.txt", b"working loop lesson")
     index.fail = True
@@ -115,11 +132,40 @@ def test_no_evidence_response_does_not_call_chat_model():
     weak = RetrievedChunk(DocumentChunk("c", "d", "unrelated", {"source": "x"}), 0.1)
     tutor = TutorService(chat, StaticIndex([weak]), retrieval_min_score=0.5)
 
-    response = tutor.answer("Explain decorators", AssistantMode.PROGRAMMING_TUTOR, {"d"})
+    response = tutor.answer(
+        "Explain decorators", AssistantMode.PROGRAMMING_TUTOR, {"d"}
+    )
 
     assert not response.grounded
     assert response.citations == ()
     assert chat.calls == 0
+
+
+def test_learning_aware_prompt_enforces_behavior_difficulty_and_policy():
+    chat = CountingChat()
+    evidence = RetrievedChunk(
+        DocumentChunk("c", "d", "A loop repeats work", {"source": "loops.txt"}),
+        0.9,
+    )
+    tutor = TutorService(chat, StaticIndex([evidence]))
+
+    tutor.answer(
+        "Fix this loop",
+        AssistantMode.PROGRAMMING_TUTOR,
+        {"d"},
+        behavior=TeachingBehavior.DEBUG_COACH,
+        difficulty=TutorDifficulty.ADVANCED,
+        policy=TutorPolicy(
+            allow_direct_answers=False,
+            allow_code_solutions=False,
+            hints_only=True,
+        ),
+    )
+
+    assert "debugging coach" in chat.last_system
+    assert "precise technical language" in chat.last_system
+    assert "hints only" in chat.last_system
+    assert "forbids complete code solutions" in chat.last_system
 
 
 def test_relevant_history_keeps_matching_old_turn_and_recent_turns():
@@ -139,7 +185,13 @@ def test_relevant_history_keeps_matching_old_turn_and_recent_turns():
 
 
 def test_hint_progression_retries_duplicate_and_advances_level():
-    chat = CountingChat(["Inspect the loop condition.", "Inspect the loop condition.", "Print the counter type."])
+    chat = CountingChat(
+        [
+            "Inspect the loop condition.",
+            "Inspect the loop condition.",
+            "Print the counter type.",
+        ]
+    )
     tutor = TutorService(chat, StaticIndex([]))
     first = tutor.next_hint("My loop is stuck", [], [])
     second = tutor.next_hint("My loop is stuck", [], list(first.hints))

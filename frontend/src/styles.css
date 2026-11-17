@@ -1,5 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap');
 
+.page .tutor-controls {grid-template-columns:220px 180px 1fr}.policy-notice {margin:-4px 0 16px;background:#f3f0ff;border-color:#d8d1ff;color:#4e438f}.policy-card {max-width:760px;background:white;border:1px solid var(--line);border-radius:16px;padding:24px;display:grid;gap:13px}.policy-heading {display:flex;align-items:center;gap:13px;margin-bottom:4px}.policy-heading>svg {width:42px;height:42px;padding:9px;border-radius:11px;background:#ece9ff;color:#6557ed}.policy-heading h2,.policy-heading p {margin:0}.policy-heading p {color:var(--muted);font-size:13px;margin-top:3px}.policy-option {display:flex;align-items:flex-start;gap:12px;border:1px solid var(--line);border-radius:11px;padding:14px;cursor:pointer}.policy-option input {width:18px;height:18px;margin-top:2px}.policy-option span {display:grid;gap:3px}.policy-option small {color:var(--muted);line-height:1.4}.policy-save {justify-self:start;display:flex;align-items:center;gap:7px;margin-top:5px}@media(max-width:760px){.page .tutor-controls{grid-template-columns:1fr}}
+
 :root { font-family: "DM Sans", sans-serif; color: #192139; background: #f6f7fc; font-synthesis: none; --ink:#192139; --muted:#69738d; --purple:#6557ed; --purple-dark:#4f43d5; --line:#dfe2ed; --panel:#fff; }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; min-height: 100vh; }

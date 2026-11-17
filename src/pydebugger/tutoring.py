@@ -7,7 +7,16 @@ import re
 from langchain_core.prompts import PromptTemplate
 
 from .hints import HintWorkflow
-from .models import AssistantMode, ChatMessage, Citation, HintProgress, TutorResponse
+from .models import (
+    AssistantMode,
+    ChatMessage,
+    Citation,
+    HintProgress,
+    TeachingBehavior,
+    TutorDifficulty,
+    TutorPolicy,
+    TutorResponse,
+)
 from .providers import ChatProvider
 from .retrieval import VectorIndex
 from .routing import RequestRoute, RequestRouter
@@ -98,6 +107,9 @@ class TutorService:
         mode: AssistantMode,
         document_ids: set[str],
         history: list[ChatMessage] | None = None,
+        behavior: TeachingBehavior | None = None,
+        difficulty: TutorDifficulty = TutorDifficulty.INTERMEDIATE,
+        policy: TutorPolicy | None = None,
     ) -> TutorResponse:
         results = [
             result
@@ -159,8 +171,18 @@ class TutorService:
             context=context_text,
             question=query,
         )
+        selected_behavior = behavior or (
+            TeachingBehavior.SOCRATIC
+            if mode is AssistantMode.RUBBER_DUCK
+            else TeachingBehavior.EXPLAIN
+        )
         return TutorResponse(
-            answer=self._chat.complete(self._system_prompt(mode, route), user_prompt),
+            answer=self._chat.complete(
+                self._system_prompt(
+                    selected_behavior, difficulty, policy or TutorPolicy(), route
+                ),
+                user_prompt,
+            ),
             citations=tuple(citations),
         )
 
@@ -178,20 +200,66 @@ class TutorService:
         return self._hints.next_hint(problem, history, previous_hints, conversation)
 
     @staticmethod
-    def _system_prompt(mode: AssistantMode, route: RequestRoute) -> str:
-        if mode == AssistantMode.RUBBER_DUCK:
-            return (
-                "You are a programming rubber duck. Use only supplied course context. "
-                "Ask one focused question or suggest one diagnostic step. Cite [n]."
+    def _system_prompt(
+        behavior: TeachingBehavior,
+        difficulty: TutorDifficulty,
+        policy: TutorPolicy,
+        route: RequestRoute,
+    ) -> str:
+        behavior_instructions = {
+            TeachingBehavior.SOCRATIC: (
+                "Use Socratic teaching: ask one focused guiding question at a time and "
+                "help the student reason toward the answer. Do not reveal the final solution."
+            ),
+            TeachingBehavior.EXPLAIN: (
+                "When instructor policy permits, give a clear direct explanation, then "
+                "include one brief check-for-understanding."
+            ),
+            TeachingBehavior.EXAM_PREP: (
+                "Act as an examiner. Ask one question at a time, wait for the student's "
+                "attempt, and do not reveal the answer in the same response."
+            ),
+            TeachingBehavior.DEBUG_COACH: (
+                "Act as a debugging coach. Identify the likely error area and suggest one "
+                "diagnostic step, but let the student repair the code."
+            ),
+        }
+        difficulty_instructions = {
+            TutorDifficulty.BEGINNER: (
+                "Use simple language, define technical terms, and keep steps small."
+            ),
+            TutorDifficulty.INTERMEDIATE: (
+                "Assume basic programming knowledge and explain the important reasoning."
+            ),
+            TutorDifficulty.ADVANCED: (
+                "Use precise technical language, discuss trade-offs, and challenge assumptions."
+            ),
+        }
+        restrictions: list[str] = []
+        if policy.hints_only:
+            restrictions.append(
+                "Instructor policy requires hints only: never provide a direct answer or a complete solution."
             )
-        if route is RequestRoute.DEBUG:
-            return (
-                "You are a programming debugging tutor. Use only supplied course context. "
-                "Explain the likely cause and one safe next step. Never execute code. Cite [n]."
+        elif not policy.allow_direct_answers:
+            restrictions.append(
+                "Instructor policy forbids direct answers: respond with guidance or questions only."
             )
-        if route is RequestRoute.RAG:
-            return "Answer concisely from supplied course context only. Cite [n] for claims."
-        return (
-            "You are a programming tutor. Teach concisely from supplied course context, "
-            "using one small example only when useful. Cite [n]."
+        if not policy.allow_code_solutions:
+            restrictions.append(
+                "Instructor policy forbids complete code solutions: use pseudocode or a minimal fragment only."
+            )
+        route_instruction = (
+            "The request concerns debugging; never execute code and preserve the student's ownership of the fix."
+            if route is RequestRoute.DEBUG
+            else "Keep the response focused on the student's question."
+        )
+        return " ".join(
+            [
+                "You are a learning-aware programming tutor. Use only supplied course context and cite [n] for claims.",
+                "Instructor policy is mandatory and overrides the selected teaching behavior.",
+                behavior_instructions[behavior],
+                difficulty_instructions[difficulty],
+                route_instruction,
+                *restrictions,
+            ]
         )

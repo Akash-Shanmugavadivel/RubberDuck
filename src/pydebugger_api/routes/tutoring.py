@@ -9,8 +9,13 @@ from sqlalchemy.orm import Session
 
 from pydebugger.retrieval import RetrievalError
 
-from ..dependencies import get_current_user, get_session, get_tutoring_service
-from ..models import ConversationRecord, User
+from ..dependencies import (
+    get_current_instructor,
+    get_current_user,
+    get_session,
+    get_tutoring_service,
+)
+from ..models import ConversationRecord, TutorPolicyRecord, User
 from ..schemas.tutoring import (
     CitationResponse,
     ConversationDetailResponse,
@@ -20,6 +25,8 @@ from ..schemas.tutoring import (
     StoredMessageResponse,
     TutorAnswerRequest,
     TutorAnswerResponse,
+    TutorPolicyResponse,
+    TutorPolicyUpdate,
 )
 from ..services.documents import OwnedResourceNotFoundError
 from ..services.tutoring import TutoringService
@@ -64,6 +71,8 @@ def answer(
             set(request.document_ids),
             [message.to_engine() for message in request.history],
             request.conversation_id,
+            request.behavior,
+            request.difficulty,
         )
     except Exception as error:
         raise _tutor_error(error) from error
@@ -81,6 +90,38 @@ def list_conversations(
     except Exception as error:
         raise _tutor_error(error) from error
     return [_conversation_summary(record) for record in records]
+
+
+@router.get("/policy", response_model=TutorPolicyResponse)
+def get_policy(
+    _: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+    tutoring: Annotated[TutoringService, Depends(get_tutoring_service)],
+) -> TutorPolicyResponse:
+    try:
+        return _policy_response(tutoring.get_policy(session))
+    except Exception as error:
+        raise _tutor_error(error) from error
+
+
+@router.put("/policy", response_model=TutorPolicyResponse)
+def update_policy(
+    request: TutorPolicyUpdate,
+    instructor: Annotated[User, Depends(get_current_instructor)],
+    session: Annotated[Session, Depends(get_session)],
+    tutoring: Annotated[TutoringService, Depends(get_tutoring_service)],
+) -> TutorPolicyResponse:
+    try:
+        policy = tutoring.update_policy(
+            session,
+            instructor.id,
+            allow_direct_answers=request.allow_direct_answers,
+            allow_code_solutions=request.allow_code_solutions,
+            hints_only=request.hints_only,
+        )
+    except Exception as error:
+        raise _tutor_error(error) from error
+    return _policy_response(policy)
 
 
 @router.get(
@@ -156,7 +197,19 @@ def _conversation_summary(record: ConversationRecord) -> ConversationSummaryResp
         id=record.id,
         title=record.title,
         mode=record.mode,
+        behavior=record.behavior,
+        difficulty=record.difficulty,
         document_ids=list(record.document_ids),
         created_at=record.created_at,
         updated_at=record.updated_at,
+    )
+
+
+def _policy_response(record: TutorPolicyRecord) -> TutorPolicyResponse:
+    return TutorPolicyResponse(
+        allow_direct_answers=record.allow_direct_answers,
+        allow_code_solutions=record.allow_code_solutions,
+        hints_only=record.hints_only,
+        updated_at=record.updated_at,
+        updated_by=record.updated_by,
     )

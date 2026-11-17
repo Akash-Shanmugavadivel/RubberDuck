@@ -33,6 +33,7 @@ class AuthenticationService:
         self._dummy_hash = self._passwords.hash(uuid.uuid4().hex)
         self._secret = settings.jwt_secret_key.get_secret_value()
         self._expiry = timedelta(minutes=settings.jwt_expiry_minutes)
+        self._instructor_emails = settings.configured_instructor_emails
 
     @staticmethod
     def normalize_email(email: str) -> str:
@@ -42,6 +43,11 @@ class AuthenticationService:
         user = User(
             email=self.normalize_email(email),
             password_hash=self._passwords.hash(password),
+            role=(
+                "instructor"
+                if self.normalize_email(email) in self._instructor_emails
+                else "student"
+            ),
         )
         session.add(user)
         try:
@@ -64,6 +70,7 @@ class AuthenticationService:
             raise InvalidCredentialsError("Invalid email or password")
         if not user.is_active:
             raise InvalidCredentialsError("Invalid email or password")
+        self._sync_configured_role(session, user)
         return user
 
     def create_access_token(self, user: User) -> tuple[str, int]:
@@ -100,4 +107,14 @@ class AuthenticationService:
         user = session.get(User, user_id)
         if user is None or not user.is_active:
             raise InvalidCredentialsError("Invalid access token")
+        self._sync_configured_role(session, user)
         return user
+
+    def _sync_configured_role(self, session: Session, user: User) -> None:
+        configured_role = (
+            "instructor" if user.email in self._instructor_emails else "student"
+        )
+        if user.role != configured_role:
+            user.role = configured_role
+            session.commit()
+            session.refresh(user)
