@@ -1,5 +1,18 @@
 # Document ingestion
 
+## API ownership boundary
+
+FastAPI document routes require a valid Bearer token. Upload and YouTube source
+keys include the authenticated user ID before the stable document ID is derived.
+This prevents students using identical filenames or video IDs from sharing or
+replacing each other's data. PostgreSQL stores document and ingestion-job owner
+IDs, and unauthorized lookups return the same not-found response as missing
+resources.
+
+The API reads at most the configured upload limit plus one byte before handing a
+file to the engine. The engine remains responsible for filename, media type,
+signature, extraction, chunking, and embedding validation.
+
 The ingestion boundary treats filenames, declared media types, document bytes,
 archive contents, markup, and remote transcript data as untrusted.
 

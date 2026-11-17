@@ -11,7 +11,7 @@ from pathlib import Path
 from threading import Event, RLock
 from typing import TypeVar
 
-from .config import AIProvider, ExecutionBackend, Settings
+from .config import AIProvider, ExecutionBackend, Settings, VectorBackend
 from .execution import (
     CodeExecutor,
     DisabledExecutor,
@@ -34,6 +34,9 @@ from .models import (
     IngestionJob,
     ProjectFile,
     RetrievedChunk,
+    TeachingBehavior,
+    TutorDifficulty,
+    TutorPolicy,
     TutorResponse,
 )
 from .monitoring import (
@@ -54,6 +57,7 @@ from .providers import (
 from .retrieval import (
     ChromaVectorIndex,
     EmbeddingMismatchError,
+    PgVectorIndex,
     RetrievalError,
     VectorIndex,
 )
@@ -89,11 +93,21 @@ class VectorStoreManager:
     ) -> None:
         self.settings = settings
         self.embeddings = embeddings
-        self.db = vector_index or ChromaVectorIndex(
-            embeddings,
-            settings.vector_dir,
-            settings.vector_collection,
-        )
+        if vector_index is not None:
+            self.db = vector_index
+        elif settings.vector_backend is VectorBackend.PGVECTOR:
+            self.db = PgVectorIndex(
+                embeddings,
+                settings.database_url,
+                settings.vector_collection,
+                settings.embedding_dimension,
+            )
+        else:
+            self.db = ChromaVectorIndex(
+                embeddings,
+                settings.vector_dir,
+                settings.vector_collection,
+            )
 
     def add(self, chunks: Iterable[DocumentChunk]) -> None:
         self.db.add(chunks)
@@ -148,8 +162,13 @@ class LLMDebugger:
         mode: AssistantMode,
         document_ids: set[str],
         history: list[ChatMessage] | None = None,
+        behavior: TeachingBehavior | None = None,
+        difficulty: TutorDifficulty = TutorDifficulty.INTERMEDIATE,
+        policy: TutorPolicy | None = None,
     ) -> TutorResponse:
-        return self.tutor.answer(query, mode, document_ids, history)
+        return self.tutor.answer(
+            query, mode, document_ids, history, behavior, difficulty, policy
+        )
 
     def next_hint(
         self,
@@ -233,15 +252,16 @@ class PyDebuggerApp:
         filename: str,
         data: bytes,
         declared_media_type: str | None = None,
+        owner_id: str | None = None,
         **control: object,
     ) -> DocumentSource:
         safe_name = self._safe_filename(filename)
-        source_key = f"upload:{safe_name.casefold()}"
+        source_key = self._scoped_source_key("upload", safe_name.casefold(), owner_id)
         with self._source_operation_lock(source_key):
             return self._observe(
                 "ingestion.document",
                 lambda: self._add_document_locked(
-                    filename, data, declared_media_type, **control
+                    filename, data, declared_media_type, owner_id=owner_id, **control
                 ),
                 {"media_type": declared_media_type or "unknown"},
             )
@@ -252,6 +272,7 @@ class PyDebuggerApp:
         data: bytes,
         declared_media_type: str | None = None,
         *,
+        owner_id: str | None = None,
         _report: Callable[[float, str], None] | None = None,
         _deadline: float | None = None,
         _cancel_event: Event | None = None,
@@ -269,7 +290,7 @@ class PyDebuggerApp:
         media_type = self.ingestor.validate_upload(safe_name, data, declared_media_type)
         self._check_ingestion_control(_deadline, _cancel_event)
         report(0.15, "Preparing document revision")
-        source_key = f"upload:{safe_name.casefold()}"
+        source_key = self._scoped_source_key("upload", safe_name.casefold(), owner_id)
         document_id = self._stable_id("upload", source_key)
         content_hash = hashlib.sha256(data).hexdigest()
         index_version = self._index_version(content_hash)
@@ -297,6 +318,7 @@ class PyDebuggerApp:
             metadata={
                 "original_filename": filename,
                 "stored_filename": path.name,
+                **({"owner_id": owner_id} if owner_id else {}),
             },
         )
         try:
@@ -321,7 +343,12 @@ class PyDebuggerApp:
         filename: str,
         data: bytes,
         declared_media_type: str | None = None,
+        owner_id: str | None = None,
     ) -> IngestionJob:
+        if owner_id:
+            return self.ingestion_jobs.submit_scoped(
+                filename, data, declared_media_type, owner_id
+            )
         return self.ingestion_jobs.submit(filename, data, declared_media_type)
 
     def get_ingestion(self, job_id: str) -> IngestionJob:
@@ -334,14 +361,16 @@ class PyDebuggerApp:
         self,
         reference: str,
         languages: tuple[str, ...] = ("en",),
+        owner_id: str | None = None,
         **control: object,
     ) -> DocumentSource:
         video_id = parse_youtube_video_id(reference)
-        with self._source_operation_lock(f"youtube:{video_id}"):
+        source_key = self._scoped_source_key("youtube", video_id, owner_id)
+        with self._source_operation_lock(source_key):
             return self._observe(
                 "ingestion.youtube",
                 lambda: self._add_youtube_transcript_locked(
-                    reference, languages, **control
+                    reference, languages, owner_id=owner_id, **control
                 ),
                 {"language_count": len(languages)},
             )
@@ -351,6 +380,7 @@ class PyDebuggerApp:
         reference: str,
         languages: tuple[str, ...] = ("en",),
         *,
+        owner_id: str | None = None,
         _report: Callable[[float, str], None] | None = None,
         _deadline: float | None = None,
         _cancel_event: Event | None = None,
@@ -390,7 +420,7 @@ class PyDebuggerApp:
                 "The video transcript exceeds the configured size limit"
             )
 
-        source_key = f"youtube:{video_id}"
+        source_key = self._scoped_source_key("youtube", video_id, owner_id)
         document_id = self._stable_id("youtube", source_key)
         content_hash = hashlib.sha256(transcript_data).hexdigest()
         index_version = self._index_version(content_hash)
@@ -425,6 +455,7 @@ class PyDebuggerApp:
                 "language_code": transcript.language_code,
                 "is_generated": transcript.is_generated,
                 "stored_filename": stored_filename,
+                **({"owner_id": owner_id} if owner_id else {}),
             },
         )
         try:
@@ -448,8 +479,16 @@ class PyDebuggerApp:
         self,
         reference: str,
         languages: tuple[str, ...] = ("en",),
+        owner_id: str | None = None,
     ) -> IngestionJob:
         encoded_languages = "\n".join(languages).encode("utf-8")
+        if owner_id:
+            return self.ingestion_jobs.submit_scoped(
+                reference,
+                encoded_languages,
+                self._YOUTUBE_JOB_MEDIA_TYPE,
+                owner_id,
+            )
         return self.ingestion_jobs.submit(
             reference, encoded_languages, self._YOUTUBE_JOB_MEDIA_TYPE
         )
@@ -461,16 +500,15 @@ class PyDebuggerApp:
     def remove_document(self, document_id: str) -> bool:
         with self._lock:
             source = self._documents.get(document_id)
-        if source is None:
-            return False
-        with self._source_operation_lock(source.source_key or source.id):
+        operation_key = (
+            source.source_key if source and source.source_key else document_id
+        )
+        with self._source_operation_lock(operation_key):
             return self._remove_document_locked(document_id)
 
     def _remove_document_locked(self, document_id: str) -> bool:
         with self._lock:
             source = self._documents.get(document_id)
-        if source is None:
-            return False
         self.index.remove_document(document_id)
         with self._lock:
             self._documents.pop(document_id, None)
@@ -481,7 +519,7 @@ class PyDebuggerApp:
                 if child.is_file():
                     child.unlink(missing_ok=True)
             self._remove_empty_directory(document_dir)
-        return True
+        return source is not None
 
     def answer(
         self,
@@ -489,13 +527,18 @@ class PyDebuggerApp:
         mode: AssistantMode,
         document_ids: set[str],
         history: list[ChatMessage] | None = None,
+        behavior: TeachingBehavior | None = None,
+        difficulty: TutorDifficulty = TutorDifficulty.INTERMEDIATE,
+        policy: TutorPolicy | None = None,
     ) -> TutorResponse:
         def answer_selected() -> TutorResponse:
             known = {document.id for document in self.list_documents()}
             selected = document_ids & known
             if not selected:
                 raise ValueError("Select at least one indexed document")
-            return self.tutor.answer(query, mode, selected, history)
+            return self.tutor.answer(
+                query, mode, selected, history, behavior, difficulty, policy
+            )
 
         return self._observe(
             "tutor.answer",
@@ -604,6 +647,11 @@ class PyDebuggerApp:
                 metadata={
                     "stored_filename": stored_filename,
                     "original_filename": metadata.get("original_filename", source_name),
+                    **(
+                        {"owner_id": str(metadata["owner_id"])}
+                        if metadata.get("owner_id")
+                        else {}
+                    ),
                 },
             )
 
@@ -619,6 +667,7 @@ class PyDebuggerApp:
         report: Callable[[float, str], None],
         deadline: float,
         cancel_event: Event,
+        owner_id: str | None = None,
     ) -> DocumentSource:
         if declared_media_type == self._YOUTUBE_JOB_MEDIA_TYPE:
             try:
@@ -628,6 +677,7 @@ class PyDebuggerApp:
             return self.add_youtube_transcript(
                 filename,
                 languages,
+                owner_id=owner_id,
                 _report=report,
                 _deadline=deadline,
                 _cancel_event=cancel_event,
@@ -636,6 +686,7 @@ class PyDebuggerApp:
             filename,
             data,
             declared_media_type,
+            owner_id=owner_id,
             _report=report,
             _deadline=deadline,
             _cancel_event=cancel_event,
@@ -675,6 +726,13 @@ class PyDebuggerApp:
         }:
             stem = f"_{stem}"
         return f"{stem}{suffix}"
+
+    @staticmethod
+    def _scoped_source_key(
+        source_type: str, source_identity: str, owner_id: str | None
+    ) -> str:
+        owner_scope = f"{owner_id.strip()}:" if owner_id and owner_id.strip() else ""
+        return f"{source_type}:{owner_scope}{source_identity}"
 
     @staticmethod
     def _stable_id(kind: str, source_key: str) -> str:

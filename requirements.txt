@@ -1,5 +1,15 @@
 # Compatibility input for pip users. `uv.lock` is the authoritative lockfile.
 # For a fully reproducible install, follow README.md and run `uv sync --locked`.
+alembic>=1.17,<2
+email-validator>=2.3,<3
+fastapi>=0.120,<1
+pgvector>=0.4,<1
+psycopg[binary]>=3.2,<4
+pwdlib[argon2]>=0.3,<1
+pyjwt>=2.10,<3
+pydantic-settings>=2.11,<3
+sqlalchemy>=2.0.44,<3
+uvicorn[standard]>=0.38,<1
 streamlit>=1.67,<2
 langchain-openai>=1.7.4,<2
 langchain-google-genai>=4.5,<5

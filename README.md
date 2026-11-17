@@ -1,10 +1,10 @@
 # PyDebugger Learning Platform
 
 PyDebugger is a document-grounded Python tutor and debugging assistant. The
-supported application has one backend composition root and one Streamlit entry
-point. Earlier scripts remain in `langchain-openai/` and `webscrapping/` as
-historical experiments; new development should use `src/pydebugger/` and
-`app.py`.
+supported application has one backend composition root, a Streamlit entry
+point, and a React + FastAPI classroom interface. Earlier scripts remain
+in `langchain-openai/` and `webscrapping/` as historical experiments; new
+backend development should use `src/pydebugger/` and `src/pydebugger_api/`.
 
 ## Supported architecture
 
@@ -23,11 +23,14 @@ The backend is split into modules with narrow responsibilities:
 - `monitoring.py` — durable latency, failure, usage, and cost metrics
 - `quality.py` — measured end-to-end engine evaluation
 - `engine.py` — the single composition root used by the application
+- `pydebugger_api/` — FastAPI routes, API configuration, and PostgreSQL access
 
-The supported vector backend is a local persistent Chroma collection. It records
-the embedding identity and index schema, ranks matches across all selected
-documents in one query, and returns stable chunk IDs and relevance scores for
-traceable citations. The in-memory index exists only as a test double.
+The primary vector backend is PostgreSQL with pgvector. It records the embedding
+identity, vector dimension, and index schema; uses collection-specific HNSW
+indexes; ranks matches across all selected documents in one query; and returns
+stable chunk IDs and relevance scores for traceable citations. Chroma remains a
+temporary migration fallback, and the in-memory index exists only as a test
+double.
 
 Uploads support validated PDF, UTF-8 text, CSV, PPTX, Markdown, and restricted
 reStructuredText. Chunks retain file hashes, media types, page/slide/row or
@@ -51,23 +54,237 @@ estimates because the embedding integration does not return usage. Cost is only
 calculated after the deployment's contracted per-million-token rates are set in
 configuration. See `docs/QUALITY_MONITORING.md`.
 
-## Run the supported application
+## FastAPI, PostgreSQL, and React application
 
-Python 3.13 is the supported runtime. `uv.lock` pins the complete dependency
+The API layer is intentionally separate from the learning engine. FastAPI owns
+HTTP concerns, SQLAlchemy owns database connections, and `src/pydebugger/`
+continues to own ingestion, tutoring, retrieval, and execution behavior. This
+keeps both the existing Streamlit UI and the React UI thin.
+
+Start the local PostgreSQL 17 database with pgvector:
+
+```powershell
+docker compose up -d postgres
+uv run --locked alembic upgrade head
+```
+
+Start the API:
+
+```powershell
+uv run --locked uvicorn pydebugger_api.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+In a second PowerShell terminal, install and start the React development UI:
+
+```powershell
+Set-Location "N:\CODE\Codex\RubberDuck\frontend"
+npm install
+npm run dev
+```
+
+Open [http://localhost:5173](http://localhost:5173), create an account, and sign
+in. Vite proxies `/api` requests to the FastAPI process on port 8000. The React
+application includes the authenticated course library, grounded tutor,
+multi-file Monaco Python workspace, structured test results and diagnostics,
+and operational monitoring. The existing Streamlit application remains a
+supported transition interface until the manual parity gate in
+`docs/REACT_PARITY.md` is completed. It is not deprecated or scheduled for
+removal yet.
+
+To point a production frontend build at a different API origin, copy
+`frontend/.env.example` to `frontend/.env` and set `VITE_API_BASE_URL`. Build
+the static bundle with:
+
+```powershell
+npm run build
+```
+
+Useful development URLs:
+
+- API documentation: [http://localhost:8000/docs](http://localhost:8000/docs)
+- Liveness: [http://localhost:8000/api/v1/health](http://localhost:8000/api/v1/health)
+- PostgreSQL/pgvector readiness: [http://localhost:8000/api/v1/ready](http://localhost:8000/api/v1/ready)
+
+`/health` confirms that the API process is running. `/ready` additionally checks
+that PostgreSQL is reachable and that the `vector` extension exists. Keeping
+these checks separate allows deployment platforms to distinguish a live process
+from one that is not ready to receive traffic.
+
+The local database credentials in `compose.yaml` are development-only. Use a
+strong secret and override `PYDEBUGGER_DATABASE_URL` outside local development.
+The engine selects pgvector by default from environment configuration. Set
+`PYDEBUGGER_EMBEDDING_DIMENSION` to the exact output dimension of the configured
+embedding model. Existing collections reject model or dimension changes instead
+of mixing incompatible vectors.
+
+### Basic authentication API
+
+Authentication uses normalized email addresses, Argon2 password hashes, and
+signed one-hour JWT access tokens. Set a unique secret of at least 32 characters
+in `.env`; never use the documented development default in a deployment:
+
+```dotenv
+PYDEBUGGER_ENVIRONMENT="production"
+PYDEBUGGER_JWT_SECRET_KEY="replace-with-a-long-random-production-secret"
+PYDEBUGGER_JWT_EXPIRY_MINUTES="60"
+PYDEBUGGER_INSTRUCTOR_EMAILS="teacher@college.edu"
+```
+
+Available endpoints:
+
+- `POST /api/v1/auth/register` with JSON `email` and `password`
+- `POST /api/v1/auth/login` with JSON `email` and `password`
+- `GET /api/v1/auth/me` with `Authorization: Bearer <token>`
+- `POST /api/v1/auth/logout` with `Authorization: Bearer <token>`
+
+Access tokens are stateless. Logout therefore removes the token from the React
+client; refresh-token rotation and server-side revocation are intentionally
+reserved for a later production-hardening phase.
+
+### Authenticated document API
+
+Document IDs are namespaced by authenticated user, so two students can upload
+the same filename or index the same YouTube video without replacing each
+other's content. PostgreSQL records document and ingestion-job ownership; every
+read, cancellation, and deletion checks that ownership without revealing
+whether another user owns the requested ID.
+
+- `POST /api/v1/documents/upload` — multipart field `file`
+- `POST /api/v1/documents/youtube` — JSON `reference` and `languages`
+- `GET /api/v1/documents` — list the current user's indexed documents
+- `DELETE /api/v1/documents/{document_id}` — remove owned storage and vectors
+- `GET /api/v1/ingestion-jobs/{job_id}` — read owned job progress/results
+- `POST /api/v1/ingestion-jobs/{job_id}/cancel` — cancel an owned job
+
+Upload bodies are bounded before engine submission. Ingestion continues through
+the existing validated background worker, and completed engine metadata is
+synchronized into the owned PostgreSQL document catalog. Ingestion worker state
+and results are persisted in PostgreSQL. If the process restarts during active
+work, startup recovery marks that job failed with `worker_restarted` rather than
+leaving it permanently queued.
+
+### Authenticated tutoring API
+
+`POST /api/v1/tutor/answer` accepts a question, teaching behavior, difficulty,
+the legacy learning mode, selected document
+IDs, and an optional conversation ID. Before retrieval or an LLM call, the API
+verifies that every selected document belongs to the authenticated user. Answers
+return structured citations, a `grounded` flag, and the durable conversation ID.
+
+```json
+{
+  "query": "Explain Python loops",
+  "mode": "programming_tutor",
+  "behavior": "socratic",
+  "difficulty": "beginner",
+  "document_ids": ["upload-document-id"],
+  "conversation_id": null
+}
+```
+
+Teaching behaviors are `socratic`, `explain`, `exam_prep`, and `debug_coach`;
+difficulty is `beginner`, `intermediate`, or `advanced`. The application-wide
+instructor policy is enforced inside the backend prompt, so a student cannot
+bypass it by changing the React request:
+
+- `GET /api/v1/tutor/policy` — show the active limits to any signed-in user
+- `PUT /api/v1/tutor/policy` — update limits as a configured instructor
+
+Set `PYDEBUGGER_INSTRUCTOR_EMAILS` to a comma-separated allowlist. Matching
+accounts are promoted on registration or their next authenticated request.
+
+- `GET /api/v1/tutor/conversations` — list the student's recent conversations
+- `GET /api/v1/tutor/conversations/{conversation_id}` — reopen messages and citations
+- `PATCH /api/v1/tutor/conversations/{conversation_id}` — rename or pin history
+- `POST /api/v1/tutor/conversations/{conversation_id}/regenerate` — replace the latest answer
+- `DELETE /api/v1/tutor/conversations/{conversation_id}` — delete owned history
+- `GET/POST /api/v1/tutor/notes` — list or save notes and citation bookmarks
+- `DELETE /api/v1/tutor/notes/{note_id}` — remove an owned note
+
+Each successful answer stores the user message, assistant response, grounding
+status, and citations in PostgreSQL. Follow-up requests use server-side history;
+the bounded client `history` field remains supported for a first request and
+backward compatibility. Conversation access is always scoped to the JWT owner.
+The React tutor adds searchable date/material groups, Markdown and code rendering,
+copyable code blocks, inline citation previews, automatic scrolling, request stop,
+answer regeneration, and saved notes/bookmarks. Real course grouping will replace
+material grouping when course entities are introduced.
+
+`POST /api/v1/tutor/hint` accepts the current problem, conversation history, and
+previous hints. It returns the next progressive hint without exposing another
+user's documents. History is validated and bounded at the API boundary, while
+the existing tutor service performs relevance selection and token budgeting.
+
+### Authenticated execution API
+
+Execution routes submit work only to the existing isolated execution service;
+the FastAPI process never evaluates student Python or launches a host Python
+subprocess.
+
+- `POST /api/v1/executions/single-file` — submit one Python source string
+- `POST /api/v1/executions/project` — submit validated files, entrypoint, and tests
+- `GET /api/v1/executions/{execution_id}` — poll owned job state and results
+- `POST /api/v1/executions/{execution_id}/cancel` — cancel an owned execution
+
+Responses contain stdout/stderr, duration, exit code, timeout/cancellation and
+resource-limit flags, structured test results, and Python diagnostics with file
+and line information. Job ownership is persisted in PostgreSQL, while detailed
+state, attempts, errors, diagnostics, test results, and progress snapshots are
+persisted by worker callbacks.
+
+### Durable job state
+
+Ingestion and execution workers publish queued, running, retrying, progress, and
+terminal snapshots to PostgreSQL. Job result payloads survive API restarts, so
+clients can still retrieve completed document metadata, diagnostics, output, and
+test results after the in-memory worker object is gone.
+
+The bounded thread pools and their queued payloads remain process-local. An API
+restart cannot resume code or ingestion that was actively running; those records
+become terminal failures with the stable `worker_restarted` error code. Moving
+payload execution to an external broker/worker system remains a later scaling
+step, but it will retain the same public job contracts.
+
+### Health and monitoring APIs
+
+- `GET /api/v1/health` is a public liveness probe. It does not contact external
+  dependencies.
+- `GET /api/v1/ready` is a public readiness probe. It reports separate
+  PostgreSQL, pgvector, and Alembic migration checks and returns `503` until all
+  are ready.
+- `GET /api/v1/monitoring/summary?window_seconds=86400` requires authentication
+  and returns per-operation calls, failures, failure rate, average/p95 latency,
+  token usage, and configured cost totals.
+
+Monitoring responses never include prompts, answers, document content, student
+code, filenames, credentials, or API keys. Until instructor/admin roles are
+introduced, any authenticated user can access aggregate operational metrics;
+deployments that require stricter separation should disable the route at the
+gateway.
+
+Stop the local database without deleting its volume:
+
+```powershell
+docker compose stop postgres
+```
+
+## Run the Streamlit transition application
+
+Python 3.12 is the supported runtime. `uv.lock` pins the complete dependency
 graph, and `.python-version` pins the Python patch release.
 
 ### Windows step-by-step guide
 
 1. Install the required tools:
 
-   - Python 3.13
+   - Python 3.12
    - [uv](https://docs.astral.sh/uv/getting-started/installation/)
    - Docker Desktop only if you want to execute student code
 
 2. Open PowerShell and enter the repository directory:
 
    ```powershell
-   Set-Location "N:\CODE\Codex\PyDebugger---LLM-RAG-Integrated-Learning-Platform"
+   Set-Location "N:\CODE\Codex\RubberDuck"
    ```
 
 3. Install the exact locked dependencies:
@@ -236,7 +453,7 @@ minimum pass rate is missed. The old random/mock evaluator was removed.
 
 1. `PyDebuggerEngine.add_document()` validates and stores the upload.
 2. `DocumentIngestor` extracts text and preserves source locations.
-3. `ChromaVectorIndex` persists chunks and ranks matches across all selected files.
+3. `PgVectorIndex` persists chunks and ranks matches across all selected files.
 4. `TutorService` selects relevant history, enforces an evidence threshold, and
    builds citations. Unsupported questions do not call the chat model.
 5. The configured `ChatProvider` generates the response.
@@ -252,14 +469,13 @@ reStructuredText raw directives and external file insertion are disabled.
 
 ## Current milestone boundaries
 
-- Document files, catalog metadata, and vectors persist locally across restarts.
-- Local Chroma is intended for a single application instance; multi-node
-  deployment will require a shared vector service behind the same interface.
+- Document files persist in bounded local storage; catalog metadata and vectors
+  persist in PostgreSQL for shared application instances.
 - Gemini and Azure OpenAI are supported provider adapters; Gemini is the default
   when `GOOGLE_API_KEY` is configured.
 - Code execution is off unless the Docker backend and pinned image pass startup checks.
-- Authentication, courses, enrollment, durable student history, assignments,
-  and instructor dashboards are planned after the core engine is strengthened.
+- Basic authentication is implemented. Courses, enrollment, durable student
+  history, assignments, and instructor dashboards remain planned.
 
 ## Legacy experiments
 

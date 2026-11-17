@@ -4,6 +4,8 @@ import time
 from pathlib import Path
 from threading import Event
 
+import pytest
+
 from pydebugger.execution import (
     DockerCodeExecutor,
     DockerExecutionPolicy,
@@ -71,6 +73,22 @@ def test_project_rejects_traversal_before_starting_docker():
 
     assert result.exit_code == 2
     assert "Unsafe Python project path" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "files,entrypoint",
+    [
+        ((ProjectFile("main.py", ""), ProjectFile("MAIN.py", "")), "main.py"),
+        ((ProjectFile("NUL.py", ""),), "NUL.py"),
+        ((ProjectFile("módulo.py", ""),), "módulo.py"),
+    ],
+)
+def test_project_rejects_platform_unsafe_names(files, entrypoint):
+    project = ExecutionProject(files=files, entrypoint=entrypoint)
+
+    result = DockerCodeExecutor(policy()).execute(project, "unsafe-name")
+
+    assert result.exit_code == 2
 
 
 class StubProjectExecutor(DockerCodeExecutor):

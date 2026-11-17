@@ -1,6 +1,6 @@
 """Supported backend for the PyDebugger learning platform."""
 
-from .config import Settings
+from .config import Settings, VectorBackend
 from .engine import (
     DocumentProcessor,
     LLMDebugger,
@@ -16,7 +16,10 @@ from .models import (
     IngestionJob,
     JobState,
     PythonDiagnostic,
+    TeachingBehavior,
     TracebackFrame,
+    TutorDifficulty,
+    TutorPolicy,
     TutorResponse,
 )
 
@@ -33,7 +36,11 @@ __all__ = [
     "PyDebuggerEngine",
     "PythonDiagnostic",
     "Settings",
+    "TeachingBehavior",
     "TracebackFrame",
+    "TutorDifficulty",
+    "TutorPolicy",
     "TutorResponse",
+    "VectorBackend",
     "VectorStoreManager",
 ]

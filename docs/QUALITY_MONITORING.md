@@ -40,6 +40,18 @@ token usage where available, calculated cost, and small operational metadata.
 The Streamlit Operations tab aggregates calls, failures, average latency, p95
 latency, usage, and cost for the last 24 hours.
 
+FastAPI exposes the same aggregate contract at
+`GET /api/v1/monitoring/summary`. The endpoint requires a valid Bearer token and
+accepts a bounded `window_seconds` query parameter from 60 seconds to 30 days.
+It adds failure rate and cross-operation totals without returning event-level or
+student-level content. Instructor/admin authorization will replace the current
+authenticated-user boundary when classroom roles are implemented.
+
+Deployment probes are separate from metrics. `/api/v1/health` reports process
+liveness without dependencies. `/api/v1/ready` verifies PostgreSQL connectivity,
+the pgvector extension, and the expected Alembic revision. This allows an
+orchestrator to keep a live but unready API out of service.
+
 LangChain chat responses expose standardized actual input and output token
 counts. The embedding integration returns vectors without usage metadata, so
 embedding tokens use a documented character-based estimate and are displayed
